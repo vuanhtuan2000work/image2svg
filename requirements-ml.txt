@@ -1,0 +1,18 @@
+# Optional MMPose stack — DO NOT install with plain `pip install -r requirements-ml.txt`.
+#
+# OpenMMLab needs:
+#   1. Python 3.10 or 3.11 (NOT 3.12+ / 3.13)
+#   2. PyTorch installed BEFORE mmcv
+#   3. openmim to fetch prebuilt mmcv wheels (avoid source build)
+#
+# Use the helper script instead:
+#   brew install uv                   # standalone Python manager (recommended on macOS)
+#   ./scripts/install-ml-deps.sh      # auto-falls back to uv if Homebrew python@3.11 is broken
+#
+# Then enable in analyze/export:
+#   export IMAGE2SVG_ML_LANDMARKS=1
+#   export IMAGE2SVG_MMPOSE=1
+#   export IMAGE2SVG_MMPOSE_CONFIG=/path/to/config.py
+#   export IMAGE2SVG_MMPOSE_CHECKPOINT=/path/to/checkpoint.pth
+#
+# Silhouette landmarks (--ml-landmarks) work in the main .venv without any of this.

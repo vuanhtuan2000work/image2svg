@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SVG Analysis · SVG Asset Pipeline</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/analyze.css" />
+  </head>
+  <body>
+    <div class="app analyze-app">
+      <header class="header">
+        <div>
+          <nav class="top-nav">
+            <a href="/">Convert</a>
+            <a href="/analyze" class="active">Analyze</a>
+          </nav>
+          <p class="eyebrow">Frame analysis compiler</p>
+          <h1>SVG Analysis</h1>
+          <p class="subtitle">Import SVG strip → compiler JSON · game manifest · ML landmarks</p>
+        </div>
+        <div class="meta-pill" id="analyzeStatus">Chưa phân tích</div>
+      </header>
+
+      <section class="controls card">
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Chọn hoặc kéo thả SVG">
+          <input type="file" id="fileInput" accept="image/svg+xml,.svg" hidden />
+          <div class="dropzone-inner">
+            <div class="drop-icon">⎘</div>
+            <p><strong>Import SVG</strong> hoặc kéo thả vào đây</p>
+            <p class="hint">Animation strip · raw traced SVG</p>
+          </div>
+        </div>
+
+        <p class="file-name" id="sourceName"></p>
+
+        <div class="analyze-options card-inner" id="analyzeOptions">
+          <h3 class="options-title">Tùy chọn phân tích</h3>
+          <div class="options-grid">
+            <label class="switch">
+              <input type="checkbox" id="mlLandmarksToggle" checked />
+              ML landmarks (silhouette)
+            </label>
+            <label class="switch" title="Cần .venv-ml + model env vars">
+              <input type="checkbox" id="mmposeToggle" />
+              MMPose (optional)
+            </label>
+          </div>
+        </div>
+
+        <div class="game-export-panel card-inner" id="gameExportPanel">
+          <h3 class="options-title">Export feed-your-pet</h3>
+          <p class="hint">Ghi <code>*.game-manifest.json</code> vào thư mục game (Phaser frame rects).</p>
+          <div class="export-fields">
+            <label class="field">
+              <span>Asset path</span>
+              <input type="text" id="assetPathInput" placeholder="4-Balinese-lengend/1-Balinese-lengend.svg" />
+            </label>
+            <label class="field">
+              <span>Game root</span>
+              <input type="text" id="gameRootInput" placeholder="Để trống = mặc định feed-your-pet" />
+            </label>
+          </div>
+          <p class="export-status" id="exportStatus" hidden></p>
+        </div>
+
+        <div class="analyze-preview-grid" id="previewRow" hidden>
+          <div class="preview-frame checker" id="svgPreview"></div>
+          <div class="summary-cards" id="summaryCards"></div>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="btn primary" id="analyzeBtn" disabled>Phân tích</button>
+          <button type="button" class="btn" id="exportGameBtn" disabled>Export game manifest</button>
+          <button type="button" class="btn" id="downloadJsonBtn" disabled>Tải JSON</button>
+          <button type="button" class="btn" id="downloadManifestBtn" disabled>Tải manifest</button>
+          <button type="button" class="btn" id="copyJsonBtn" disabled>Copy JSON</button>
+        </div>
+      </section>
+
+      <section class="card skeleton-review-panel" id="skeletonReviewPanel" hidden>
+        <div class="panel-head">
+          <div>
+            <h2>Analysis Preview</h2>
+            <p class="panel-subtitle">Strip overview · per-frame crop · skeleton · game export rects</p>
+          </div>
+          <label class="review-status-label">
+            Review
+            <select id="reviewStatusSelect">
+              <option>Not Reviewed</option>
+              <option>Needs Review</option>
+              <option>Auto Accepted</option>
+              <option>Manually Corrected</option>
+              <option>Rejected</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="preview-banner" id="previewBanner" hidden></div>
+
+        <div class="strip-preview-panel" id="stripPreviewPanel" hidden>
+          <div class="strip-preview-head">
+            <h3>Strip overview</h3>
+            <span class="strip-preview-meta" id="stripPreviewMeta"></span>
+          </div>
+          <div class="strip-preview-stage-wrap" id="stripPreviewStageWrap">
+            <div class="strip-preview-stage" id="stripPreviewStage"></div>
+          </div>
+        </div>
+
+        <div class="overlay-legend" id="overlayLegend" hidden>
+          <span><i class="swatch skeleton"></i> Skeleton</span>
+          <span><i class="swatch landmark"></i> Landmarks</span>
+          <span><i class="swatch ml"></i> ML landmarks</span>
+          <span><i class="swatch game"></i> Game rect</span>
+          <span><i class="swatch frame"></i> Frame split</span>
+        </div>
+
+        <div class="frame-timeline" id="frameTimeline" role="tablist" aria-label="Frame timeline"></div>
+
+        <div class="overlay-toggles">
+          <span class="toggle-group-label">Overlays</span>
+          <label class="switch"><input type="checkbox" data-toggle="skeleton" checked /> Skeleton</label>
+          <label class="switch"><input type="checkbox" data-toggle="landmarks" checked /> Landmarks</label>
+          <label class="switch"><input type="checkbox" data-toggle="mlLandmarks" /> ML landmarks</label>
+          <label class="switch"><input type="checkbox" data-toggle="gameRect" checked /> Game rect</label>
+          <label class="switch"><input type="checkbox" data-toggle="coreBodyBBox" /> Core body</label>
+          <label class="switch"><input type="checkbox" data-toggle="frameBBox" /> Frame split</label>
+          <label class="switch"><input type="checkbox" data-toggle="contentBBox" checked /> Content</label>
+          <label class="switch"><input type="checkbox" data-toggle="confidenceLabels" checked /> Labels</label>
+        </div>
+
+        <p class="frame-grid-hint">Mỗi ô = frame crop (viewBox) + overlay QA trước khi export sang Phaser.</p>
+        <div class="frame-cards-grid" id="frameCardsGrid"></div>
+      </section>
+
+      <section class="card analyze-results" id="resultsPanel" hidden>
+        <div class="layer-tabs" role="tablist">
+          <button type="button" class="layer-tab active" data-layer="assetAnalysis">Asset</button>
+          <button type="button" class="layer-tab" data-layer="stripAnalysis">Strip</button>
+          <button type="button" class="layer-tab" data-layer="frameAnalysis">Frames</button>
+          <button type="button" class="layer-tab" data-layer="partAnalysis">Parts</button>
+          <button type="button" class="layer-tab" data-layer="temporalAnalysis">Temporal</button>
+          <button type="button" class="layer-tab" data-layer="gameManifest">Game</button>
+          <button type="button" class="layer-tab" data-layer="stackRecommendation">Stack</button>
+          <button type="button" class="layer-tab" data-layer="qualityReport">Quality</button>
+          <button type="button" class="layer-tab" data-layer="full">Full JSON</button>
+        </div>
+
+        <div class="frame-toolbar" id="frameToolbar" hidden>
+          <label for="frameSelect">Frame</label>
+          <select id="frameSelect"></select>
+        </div>
+
+        <pre class="json-view" id="jsonView"></pre>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+    <script src="/static/skeleton-review.js"></script>
+    <script src="/static/analyze.js"></script>
+  </body>
+</html>

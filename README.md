@@ -63,6 +63,35 @@ Tương đương CLI:
 python convert.py --part eye --smoothing high --color-precision 8 --sharpness 80 --remove-bg --trim
 ```
 
+## Analyze + game export (`/analyze`)
+
+Màn **Analyze** (http://127.0.0.1:8765/analyze) chạy compiler 8-pass trên SVG frame strip: tách frame, scene graph, skeleton QA, temporal smoothing.
+
+Output JSON gồm:
+
+- `gameManifest` — frame rects tương thích **feed-your-pet** (Phaser 3 SVG sprite, không phải bone rig)
+- `stackRecommendation` — lý do không dùng Spine/DragonBones; ML (MMPose/DeepLabCut) chỉ optional Phase 2
+
+Chi tiết so sánh stack: [docs/ANIMATION_STACK.md](docs/ANIMATION_STACK.md)
+
+### Export manifest sang feed-your-pet
+
+```bash
+# Ghi manifest vào game (mặc định ../game-2d/feed-your-pet)
+.venv/bin/python scripts/export_game_manifest.py \
+  ../game-2d/feed-your-pet/public/assets/pet/cat_actions/run/4-Balinese-lengend/1-Balinese-lengend.svg
+
+# Bật ML landmarks (silhouette; thêm --mmpose nếu đã cài .venv-ml qua scripts/install-ml-deps.sh)
+.venv/bin/python scripts/export_game_manifest.py path/to/sheet.svg --ml-landmarks
+
+# Sau đó trong game repo:
+cd ../game-2d/feed-your-pet && node scripts/generate-cat-variants.mjs
+```
+
+API: `POST /api/export-game-manifest` (form: `file`, optional `asset_path`, `game_root`, `ml_landmarks`, `mmpose`).
+
+Biến môi trường: `IMAGE2SVG_GAME_ROOT`, `IMAGE2SVG_ML_LANDMARKS=1`, `IMAGE2SVG_MMPOSE=1`.
+
 ## Chạy pipeline CLI
 
 ```bash

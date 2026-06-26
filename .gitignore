@@ -1,4 +1,6 @@
 .venv/
+.venv-ml/
 __pycache__/
 *.tmp.svg
 .DS_Store
+data/

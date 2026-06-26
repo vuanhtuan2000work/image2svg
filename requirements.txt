@@ -5,3 +5,8 @@ pillow>=10.0
 fastapi>=0.115
 uvicorn[standard]>=0.32
 python-multipart>=0.0.9
+svg.path>=6.0
+numpy>=1.26
+pulp>=2.8
+# Optional (needs system cairo): cairosvg>=2.7
+# Optional raster CLI: librsvg (rsvg-convert)

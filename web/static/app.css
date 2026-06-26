@@ -49,6 +49,32 @@ body {
   text-transform: uppercase;
 }
 
+.top-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.top-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.top-nav a:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.top-nav a.active {
+  color: var(--text);
+  background: rgba(124, 156, 255, 0.12);
+  border-color: rgba(124, 156, 255, 0.35);
+}
+
 h1 {
   margin: 0;
   font-size: clamp(28px, 4vw, 40px);
