@@ -1,0 +1,7 @@
+vtracer==0.6.*
+pyyaml>=6.0
+scour>=0.38
+pillow>=10.0
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-multipart>=0.0.9

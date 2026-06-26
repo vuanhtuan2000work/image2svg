@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SVG Asset Pipeline</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div>
+          <p class="eyebrow">Local · offline</p>
+          <h1>PNG → SVG</h1>
+          <p class="subtitle">vtracer trace + SVGO · preview ngay · export SVG</p>
+        </div>
+        <div class="meta-pill" id="optimizerBadge">…</div>
+      </header>
+
+      <section class="controls card">
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Chọn hoặc kéo thả ảnh">
+          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden />
+          <div class="dropzone-inner">
+            <div class="drop-icon">↑</div>
+            <p><strong>Chọn ảnh</strong> hoặc kéo thả vào đây</p>
+            <p class="hint">PNG, JPG, WebP · chọn nhiều ảnh cùng lúc</p>
+          </div>
+        </div>
+
+        <section class="file-list-panel" id="fileListPanel" hidden>
+          <div class="file-list-header">
+            <h2>Ảnh đã chọn · <span id="fileCount">0</span></h2>
+            <button type="button" class="btn small" id="clearFilesBtn">Xóa tất cả</button>
+          </div>
+          <ul class="file-list" id="fileList"></ul>
+        </section>
+
+        <div class="control-grid">
+          <div class="control-row">
+            <label for="partSelect">Loại part</label>
+            <select id="partSelect">
+              <option value="default">default (recipes.yaml)</option>
+            </select>
+          </div>
+
+          <div class="control-row">
+            <label for="smoothingSelect">Độ mịn rìa</label>
+            <select id="smoothingSelect">
+              <option value="none">none — trace thẳng (nhanh)</option>
+              <option value="low">low — upscale 2x</option>
+              <option value="medium" selected>medium — upscale 3x (khuyên dùng)</option>
+              <option value="high">high — upscale 4x (mịn nhất, chậm)</option>
+            </select>
+          </div>
+
+          <div class="control-row">
+            <label for="colorRange">Màu sắc chuẩn xác · <span id="colorVal">tự động</span></label>
+            <input type="range" id="colorRange" min="0" max="8" step="1" value="0" />
+          </div>
+
+          <div class="control-row">
+            <label for="sharpRange">Độ rõ nét · <span id="sharpVal">0</span></label>
+            <input type="range" id="sharpRange" min="0" max="250" step="10" value="0" />
+          </div>
+        </div>
+
+        <div class="toggle-row">
+          <label class="switch">
+            <input type="checkbox" id="removeBg" />
+            <span>Xóa nền (trong suốt)</span>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="trimPad" />
+            <span>Cắt padding (ôm sát nội dung)</span>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="btn primary" id="convertBtn" disabled>Convert</button>
+          <button type="button" class="btn" id="downloadBtn" disabled>Tải SVG</button>
+          <button type="button" class="btn accent" id="exportAllBtn" disabled>Export tất cả (ZIP)</button>
+        </div>
+      </section>
+
+      <section class="preview-grid" id="previewGrid" hidden>
+        <article class="card preview-panel">
+          <h2>Ảnh gốc</h2>
+          <div class="preview-frame checker">
+            <img id="sourcePreview" alt="Ảnh gốc" />
+          </div>
+          <p class="file-name" id="sourceName"></p>
+        </article>
+
+        <article class="card preview-panel">
+          <div class="panel-head">
+            <h2>SVG output</h2>
+            <button type="button" class="btn small accent" id="exportSvgBtn" disabled>Export SVG</button>
+          </div>
+          <div class="preview-frame checker" id="svgPreview"></div>
+          <p class="stats" id="statsLine"></p>
+        </article>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

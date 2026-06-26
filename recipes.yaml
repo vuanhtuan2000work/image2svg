@@ -1,0 +1,96 @@
+# =============================================================================
+# recipes.yaml — tham số vtracer theo từng loại part động vật (modular asset).
+#
+# Triết lý: CHUẨN XÁC trước. Mặc định giữ trung thực hình + màu so với ảnh gốc:
+#   color_precision cao (8) + layer_difference thấp (8) = ít gộp màu, đúng gradient.
+# Vì vậy đổi qua lại giữa các part MÀU (eye/ear/head/body...) cho ra hình gần như
+# nhau, không làm méo ảnh. Chỉ các part LINE-ART (nose/mouth/eyebrow/whiskers) mới
+# dùng colormode binary vì bản chất là nét đen 1 màu.
+#
+# Thêm part mới: tạo folder assets/raw/<part>/ + thêm block dưới `parts`.
+# =============================================================================
+
+default:
+  colormode: color
+  hierarchical: stacked
+  mode: spline           # bo cong mượt thay vì gãy khúc
+  filter_speckle: 4      # bỏ đốm nhỏ < 4px (noise)
+  color_precision: 8     # số bit màu/kênh (1-8); 8 = giữ màu chuẩn nhất
+  layer_difference: 8    # thấp = nhiều layer = gradient/hình trung thực
+  corner_threshold: 60
+  length_threshold: 4.0
+  splice_threshold: 45
+  path_precision: 3
+
+parts:
+  # ---- NHÓM MẶT (head region) -------------------------------------------
+  # Mắt: glossy, giữ highlight nhỏ -> filter_speckle thấp.
+  eye:
+    filter_speckle: 3
+
+  # Lông mày: line-art mảnh, nét sắc.
+  eyebrow:
+    colormode: binary
+    corner_threshold: 45
+    filter_speckle: 2
+
+  # Mũi: line-art đen, giữ nét nhọn.
+  nose:
+    colormode: binary
+    corner_threshold: 40
+    filter_speckle: 2
+
+  # Miệng: line-art, cong mượt nhưng rõ nét.
+  mouth:
+    colormode: binary
+    mode: spline
+    corner_threshold: 45
+    filter_speckle: 2
+
+  # Răng nanh / răng: mảng trắng nhỏ, viền sắc (giữ màu).
+  teeth:
+    corner_threshold: 45
+    filter_speckle: 2
+
+  # Lưỡi: mảng hồng, giữ gradient nhẹ.
+  tongue:
+    filter_speckle: 3
+
+  # Má hồng (blush): gradient tròn mềm.
+  cheek:
+    filter_speckle: 5
+
+  # Râu (whiskers): line-art rất mảnh, giữ tối đa chi tiết.
+  whiskers:
+    colormode: binary
+    mode: spline
+    filter_speckle: 1
+
+  # ---- PHỤ KIỆN ĐẦU -----------------------------------------------------
+  ear:
+    filter_speckle: 4
+
+  horn:
+    corner_threshold: 50
+    filter_speckle: 3
+
+  head:
+    filter_speckle: 5
+
+  # ---- THÂN & CHI -------------------------------------------------------
+  body:
+    filter_speckle: 5
+
+  leg:
+    filter_speckle: 3
+
+  tail:
+    filter_speckle: 4
+
+  wing:
+    filter_speckle: 3
+
+  # ---- HỌA TIẾT ---------------------------------------------------------
+  # Lông / vằn / đốm: giữ chi tiết họa tiết nhỏ.
+  fur:
+    filter_speckle: 2
