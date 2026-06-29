@@ -91,6 +91,8 @@ const I18N = {
     "stats.type": "type",
     "stats.svg": "svg",
     "stats.smoothing": "smooth",
+    "stats.upscale": "upscale",
+    "stats.resolution": "resolution",
     "stats.color": "color",
     "stats.sharpness": "sharp",
     "stats.removeBg": "remove-bg",
@@ -154,6 +156,8 @@ const I18N = {
     "stats.type": "type",
     "stats.svg": "svg",
     "stats.smoothing": "mịn",
+    "stats.upscale": "phóng",
+    "stats.resolution": "độ phân giải",
     "stats.color": "màu",
     "stats.sharpness": "nét",
     "stats.removeBg": "xóa-nền",
@@ -336,6 +340,8 @@ function formatStats(data) {
   if (p.svg_mode) flags.push(`${t("stats.svg")}:${p.svg_mode}`);
   if (p.source) flags.push(p.source);
   if (p.smoothing) flags.push(`${t("stats.smoothing")}:${p.smoothing}`);
+  if (p.upscale && p.upscale > 1) flags.push(`${t("stats.upscale")}:${p.upscale}x`);
+  if (p.width && p.height) flags.push(`${t("stats.resolution")}:${p.width}×${p.height}`);
   if (p.color_precision) flags.push(`${t("stats.color")}:${p.color_precision}`);
   if (p.sharpness) flags.push(`${t("stats.sharpness")}:${p.sharpness}`);
   if (p.remove_bg) flags.push(t("stats.removeBg"));

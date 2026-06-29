@@ -5,6 +5,15 @@ const OUTPUT_FORMATS = ["jpg", "jpeg", "png", "webp", "avif", "svg"];
 const DISABLED_OUTPUT_FORMATS = ["gif", "bmp", "tiff", "heic"];
 const SVG_MODES = ["embedded"];
 const SMOOTHING_LEVELS = ["none", "low", "medium", "high"];
+const SMOOTHING_PRESETS = {
+  none: 1,
+  low: 2,
+  medium: 3,
+  high: 4,
+};
+const DEFAULT_SHARPNESS = 80;
+const MAX_OUTPUT_SIDE = 4096;
+const MAX_OUTPUT_PIXELS = 12_000_000;
 const NO_ALPHA_OUTPUTS = new Set(["jpg", "jpeg"]);
 
 const MIME_BY_FORMAT = {
@@ -83,6 +92,174 @@ function encodePng(width, height, rgba) {
   return new Uint8Array(UPNG.encode([rgba.buffer], width, height, 0));
 }
 
+function clampByte(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function requestedUpscaleFor(smoothing) {
+  return SMOOTHING_PRESETS[smoothing] || SMOOTHING_PRESETS.medium;
+}
+
+function effectiveUpscaleFor(width, height, smoothing) {
+  const requested = requestedUpscaleFor(smoothing);
+  if (requested <= 1) return 1;
+
+  const sideLimit = MAX_OUTPUT_SIDE / Math.max(width, height);
+  const pixelLimit = Math.sqrt(MAX_OUTPUT_PIXELS / Math.max(1, width * height));
+  const effective = Math.min(requested, sideLimit, pixelLimit);
+  if (effective <= 1) return 1;
+  return Math.floor(effective * 100) / 100;
+}
+
+function trimDecodedToAlpha(decoded) {
+  const { width, height, rgba } = decoded;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const alpha = rgba[(y * width + x) * 4 + 3];
+      if (alpha > 0) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return { ...decoded, trimmed: false };
+  if (minX === 0 && minY === 0 && maxX === width - 1 && maxY === height - 1) {
+    return { ...decoded, trimmed: false };
+  }
+
+  const outWidth = maxX - minX + 1;
+  const outHeight = maxY - minY + 1;
+  const out = new Uint8Array(outWidth * outHeight * 4);
+  for (let y = 0; y < outHeight; y += 1) {
+    const srcStart = ((minY + y) * width + minX) * 4;
+    const dstStart = y * outWidth * 4;
+    out.set(rgba.subarray(srcStart, srcStart + outWidth * 4), dstStart);
+  }
+
+  return { width: outWidth, height: outHeight, rgba: out, trimmed: true };
+}
+
+function resizeDecoded(decoded, scale) {
+  if (scale <= 1) return decoded;
+
+  const { width, height, rgba } = decoded;
+  const outWidth = Math.max(1, Math.round(width * scale));
+  const outHeight = Math.max(1, Math.round(height * scale));
+  const out = new Uint8Array(outWidth * outHeight * 4);
+
+  for (let y = 0; y < outHeight; y += 1) {
+    const srcY = Math.max(0, Math.min(height - 1, (y + 0.5) / scale - 0.5));
+    const y0 = Math.floor(srcY);
+    const y1 = Math.min(height - 1, y0 + 1);
+    const wy = srcY - y0;
+
+    for (let x = 0; x < outWidth; x += 1) {
+      const srcX = Math.max(0, Math.min(width - 1, (x + 0.5) / scale - 0.5));
+      const x0 = Math.floor(srcX);
+      const x1 = Math.min(width - 1, x0 + 1);
+      const wx = srcX - x0;
+      const samples = [
+        { index: (y0 * width + x0) * 4, weight: (1 - wx) * (1 - wy) },
+        { index: (y0 * width + x1) * 4, weight: wx * (1 - wy) },
+        { index: (y1 * width + x0) * 4, weight: (1 - wx) * wy },
+        { index: (y1 * width + x1) * 4, weight: wx * wy },
+      ];
+
+      let alpha = 0;
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      for (const sample of samples) {
+        const a = rgba[sample.index + 3] / 255;
+        const weight = sample.weight;
+        alpha += a * weight;
+        red += rgba[sample.index] * a * weight;
+        green += rgba[sample.index + 1] * a * weight;
+        blue += rgba[sample.index + 2] * a * weight;
+      }
+
+      const dst = (y * outWidth + x) * 4;
+      if (alpha > 0) {
+        out[dst] = clampByte(red / alpha);
+        out[dst + 1] = clampByte(green / alpha);
+        out[dst + 2] = clampByte(blue / alpha);
+      }
+      out[dst + 3] = clampByte(alpha * 255);
+    }
+  }
+
+  return { width: outWidth, height: outHeight, rgba: out };
+}
+
+function sharpenDecoded(decoded, sharpness) {
+  if (sharpness <= 0) return decoded;
+
+  const { width, height, rgba } = decoded;
+  const out = new Uint8Array(rgba);
+  const amount = Math.min(2.2, Math.max(0, sharpness) / 100);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const dst = (y * width + x) * 4;
+      if (rgba[dst + 3] === 0) {
+        out[dst] = 0;
+        out[dst + 1] = 0;
+        out[dst + 2] = 0;
+        continue;
+      }
+
+      for (let channel = 0; channel < 3; channel += 1) {
+        let sum = 0;
+        let count = 0;
+        for (let dy = -1; dy <= 1; dy += 1) {
+          const yy = Math.max(0, Math.min(height - 1, y + dy));
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const xx = Math.max(0, Math.min(width - 1, x + dx));
+            sum += rgba[(yy * width + xx) * 4 + channel];
+            count += 1;
+          }
+        }
+        const blur = sum / count;
+        const original = rgba[dst + channel];
+        out[dst + channel] = clampByte(original + (original - blur) * amount);
+      }
+    }
+  }
+
+  return { width, height, rgba: out };
+}
+
+function processPngForOutput(pngBytes, { smoothing, sharpness, trim }) {
+  let decoded = decodePng(pngBytes);
+  let trimmed = false;
+  if (trim) {
+    decoded = trimDecodedToAlpha(decoded);
+    trimmed = decoded.trimmed;
+  }
+
+  const requestedUpscale = requestedUpscaleFor(smoothing);
+  const effectiveUpscale = effectiveUpscaleFor(decoded.width, decoded.height, smoothing);
+  decoded = resizeDecoded(decoded, effectiveUpscale);
+  decoded = sharpenDecoded(decoded, sharpness);
+
+  return {
+    bytes: encodePng(decoded.width, decoded.height, decoded.rgba),
+    width: decoded.width,
+    height: decoded.height,
+    requestedUpscale,
+    upscale: effectiveUpscale,
+    trimApplied: trimmed,
+  };
+}
+
 function trimPngToAlpha(pngBytes) {
   const { width, height, rgba } = decodePng(pngBytes);
   let minX = width;
@@ -127,7 +304,7 @@ function trimPngToAlpha(pngBytes) {
   };
 }
 
-async function transformImage(env, source, { outputFormat, removeBg = false, sharpness = 0 }) {
+async function transformImage(env, source, { outputFormat, removeBg = false }) {
   const imageFormat = IMAGE_OUTPUT_BY_FORMAT[outputFormat];
   if (!imageFormat) {
     throw new Error(`Định dạng output không hỗ trợ trên Cloudflare: ${outputFormat}`);
@@ -136,9 +313,6 @@ async function transformImage(env, source, { outputFormat, removeBg = false, sha
   let pipeline = env.IMAGES.input(source.stream());
   if (removeBg) {
     pipeline = pipeline.transform({ segment: "foreground" });
-  }
-  if (sharpness > 0) {
-    pipeline = pipeline.transform({ sharpen: Math.max(0, Math.min(10, sharpness / 25)) });
   }
 
   const outputOptions = { format: imageFormat };
@@ -172,10 +346,13 @@ async function handleMeta() {
     defaultRecipe: {},
     smoothingLevels: SMOOTHING_LEVELS,
     defaultSmoothing: "medium",
+    defaultSharpness: DEFAULT_SHARPNESS,
     cloudflare: {
       mode: "worker-native",
       vectorSvg: false,
       removeBackground: "cloudflare-images:segment=foreground",
+      maxOutputSide: MAX_OUTPUT_SIDE,
+      maxOutputPixels: MAX_OUTPUT_PIXELS,
       disabledOutputTypes: DISABLED_OUTPUT_FORMATS,
     },
   });
@@ -199,7 +376,7 @@ async function handleConvert(request, env) {
 
   const svgMode = String(form.get("svg_mode") || "embedded");
   const smoothing = String(form.get("smoothing") || "medium");
-  const sharpness = Math.max(0, Math.min(250, Number(form.get("sharpness") || 0)));
+  const sharpness = Math.max(0, Math.min(250, Number(form.get("sharpness") || DEFAULT_SHARPNESS)));
   const removeBg = String(form.get("remove_bg") || "false") === "true";
   const trim = String(form.get("trim") || "false") === "true";
   if (outputType === "svg" && svgMode !== "embedded") {
@@ -207,18 +384,10 @@ async function handleConvert(request, env) {
   }
 
   if (outputType === "svg") {
-    let pngBytes = await transformImage(env, file, { outputFormat: "png", removeBg, sharpness });
-    let { width, height } = decodePng(pngBytes);
-    let trimmed = false;
-    if (trim) {
-      const result = trimPngToAlpha(pngBytes);
-      pngBytes = result.bytes;
-      width = result.width;
-      height = result.height;
-      trimmed = result.trimmed;
-    }
+    const normalizedPng = await transformImage(env, file, { outputFormat: "png", removeBg });
+    const processed = processPngForOutput(normalizedPng, { smoothing, sharpness, trim });
 
-    const svg = svgEmbedPng(pngBytes, width, height);
+    const svg = svgEmbedPng(processed.bytes, processed.width, processed.height);
     return json({
       filename: filenameFor(file.name, "svg"),
       extension: "svg",
@@ -228,11 +397,15 @@ async function handleConvert(request, env) {
         svg_mode: "embedded",
         source: "cloudflare-images",
         smoothing,
+        requested_upscale: processed.requestedUpscale,
+        upscale: processed.upscale,
         sharpness,
+        width: processed.width,
+        height: processed.height,
         remove_bg: removeBg,
         remove_bg_engine: removeBg ? "cloudflare-images:segment=foreground" : undefined,
         trim,
-        trim_applied: trimmed,
+        trim_applied: processed.trimApplied,
       },
       optimizer: "cloudflare-images",
       elapsed: Number(((performance.now() - t0) / 1000).toFixed(2)),
@@ -241,23 +414,16 @@ async function handleConvert(request, env) {
   }
 
   const outputFormat = outputType === "jpg" ? "jpg" : outputType;
+  const normalizedPng = await transformImage(env, file, { outputFormat: "png", removeBg });
+  const processed = processPngForOutput(normalizedPng, { smoothing, sharpness, trim });
   let bytes;
-  let trimApplied = false;
-  if (trim) {
-    const pngBytes = await transformImage(env, file, { outputFormat: "png", removeBg, sharpness });
-    const result = trimPngToAlpha(pngBytes);
-    trimApplied = result.trimmed;
-    if (outputFormat === "png") {
-      bytes = result.bytes;
-    } else {
-      bytes = await transformImage(env, new Blob([result.bytes], { type: "image/png" }), {
-        outputFormat,
-        removeBg: false,
-        sharpness: 0,
-      });
-    }
+  if (outputFormat === "png") {
+    bytes = processed.bytes;
   } else {
-    bytes = await transformImage(env, file, { outputFormat, removeBg, sharpness });
+    bytes = await transformImage(env, new Blob([processed.bytes], { type: "image/png" }), {
+      outputFormat,
+      removeBg: false,
+    });
   }
   const dataBase64 = bytesToBase64(bytes);
   const mime = MIME_BY_FORMAT[outputType];
@@ -265,10 +431,14 @@ async function handleConvert(request, env) {
     format: outputType,
     source: "cloudflare-images",
     smoothing,
+    requested_upscale: processed.requestedUpscale,
+    upscale: processed.upscale,
     sharpness,
+    width: processed.width,
+    height: processed.height,
     remove_bg: removeBg,
     trim,
-    trim_applied: trimApplied,
+    trim_applied: processed.trimApplied,
   };
   if (removeBg) {
     params.remove_bg_engine = "cloudflare-images:segment=foreground";

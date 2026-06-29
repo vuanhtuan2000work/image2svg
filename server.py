@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from convert import (
+    DEFAULT_SHARPNESS,
     DEFAULT_SMOOTHING,
     OUTPUT_FORMATS,
     RASTER_MIME_TYPES,
@@ -221,6 +222,7 @@ def meta() -> dict:
         "defaultRecipe": recipes.get("default") or {},
         "smoothingLevels": list(SMOOTHING_PRESETS.keys()),
         "defaultSmoothing": DEFAULT_SMOOTHING,
+        "defaultSharpness": DEFAULT_SHARPNESS,
         "analyze": {
             "defaultGameRoot": str(resolve_game_root(None)),
             "features": {
@@ -240,7 +242,7 @@ async def convert(
     svg_mode: str = Form("embedded"),
     smoothing: str = Form(DEFAULT_SMOOTHING),
     color_precision: int = Form(0),
-    sharpness: int = Form(0),
+    sharpness: int = Form(DEFAULT_SHARPNESS),
     remove_bg: bool = Form(False),
     trim: bool = Form(False),
 ) -> dict:

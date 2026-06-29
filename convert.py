@@ -54,6 +54,7 @@ SMOOTHING_PRESETS = {
     "high": {"upscale": 4, "blur": 0.0},
 }
 DEFAULT_SMOOTHING = "medium"
+DEFAULT_SHARPNESS = 80
 OUTPUT_FORMATS = ("jpg", "jpeg", "png", "webp", "avif", "gif", "svg", "bmp", "tiff", "heic")
 SVG_MODES = ("embedded", "vector")
 RASTER_OUTPUT_FORMATS = tuple(fmt for fmt in OUTPUT_FORMATS if fmt != "svg")
@@ -278,7 +279,7 @@ def convert_embedded_svg_bytes(
     image_bytes: bytes,
     *,
     smoothing: str = DEFAULT_SMOOTHING,
-    sharpness: int = 0,
+    sharpness: int = DEFAULT_SHARPNESS,
     remove_bg: bool = False,
     trim: bool = False,
 ) -> tuple[str, dict, str, float]:
@@ -301,7 +302,10 @@ def convert_embedded_svg_bytes(
         "svg_mode": "embedded",
         "source": "embedded-raster",
         "smoothing": smoothing,
+        "upscale": int(preset["upscale"]),
         "sharpness": sharpness,
+        "width": img.width,
+        "height": img.height,
         "remove_bg": remove_bg,
         "trim": trim,
     }
@@ -315,7 +319,7 @@ def convert_raster_image_bytes(
     *,
     output_type: str,
     smoothing: str = "none",
-    sharpness: int = 0,
+    sharpness: int = DEFAULT_SHARPNESS,
     remove_bg: bool = False,
     trim: bool = False,
 ) -> tuple[bytes, dict, str, str, float]:
@@ -340,7 +344,10 @@ def convert_raster_image_bytes(
         "format": output_type,
         "source": "raster-image",
         "smoothing": smoothing,
+        "upscale": int(preset["upscale"]),
         "sharpness": sharpness,
+        "width": img.width,
+        "height": img.height,
         "remove_bg": remove_bg,
         "trim": trim,
     }
@@ -449,7 +456,7 @@ def convert_one(
     optimizer: str,
     smoothing: str = "none",
     *,
-    sharpness: int = 0,
+    sharpness: int = DEFAULT_SHARPNESS,
     remove_bg: bool = False,
     trim: bool = False,
 ) -> None:
@@ -514,7 +521,7 @@ def convert_image_bytes(
     recipes: dict | None = None,
     smoothing: str = DEFAULT_SMOOTHING,
     color_precision: int | None = None,
-    sharpness: int = 0,
+    sharpness: int = DEFAULT_SHARPNESS,
     remove_bg: bool = False,
     trim: bool = False,
 ) -> tuple[str, dict, str, float]:
@@ -569,8 +576,8 @@ def main() -> int:
     ap.add_argument(
         "--sharpness",
         type=int,
-        default=0,
-        help="Độ rõ nét 0-250 (unsharp mask trước trace). 0 = tắt.",
+        default=DEFAULT_SHARPNESS,
+        help="Độ rõ nét 0-250 (unsharp mask trước trace). Mặc định: %(default)s.",
     )
     ap.add_argument("--remove-bg", action="store_true", help="Xóa nền (-> trong suốt).")
     ap.add_argument("--trim", action="store_true", help="Cắt padding, ôm sát nội dung.")
