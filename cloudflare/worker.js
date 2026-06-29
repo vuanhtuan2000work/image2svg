@@ -339,6 +339,7 @@ export default {
       if (url.pathname === "/api/convert" && request.method === "POST") return handleConvert(request, env);
       if (url.pathname === "/api/export-zip" && request.method === "POST") return handleExportZip(request);
       if (url.pathname.startsWith("/api/")) return error(404, "API này là local-only trên Cloudflare mode.");
+      if (url.pathname === "/analyze" || url.pathname === "/analyze.html") return error(404, "Analyze feature is hidden on Cloudflare mode.");
       return env.ASSETS.fetch(request);
     } catch (err) {
       return error(500, err?.message || "Cloudflare Worker lỗi.");

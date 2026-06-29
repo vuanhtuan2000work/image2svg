@@ -37,8 +37,6 @@ let currentLang = localStorage.getItem("image2svg.lang") || "en";
 const I18N = {
   en: {
     "nav.convert": "Convert",
-    "nav.analyze": "Analyze",
-    "hero.eyebrow": "Local · offline",
     "hero.subtitle": "Convert images, remove backgrounds, preview instantly, export clean files",
     "language.label": "Language",
     "dropzone.aria": "Choose or drop images",
@@ -102,8 +100,6 @@ const I18N = {
   },
   vi: {
     "nav.convert": "Convert",
-    "nav.analyze": "Analyze",
-    "hero.eyebrow": "Local · offline",
     "hero.subtitle": "Chuyển đổi ảnh, xóa nền, preview ngay, export file sạch",
     "language.label": "Ngôn ngữ",
     "dropzone.aria": "Chọn hoặc kéo thả ảnh",
@@ -232,6 +228,27 @@ function exportFilename(result) {
   const cleanName = rawName.split(/[\\/]/).pop() || "asset";
   const stem = cleanName.replace(/\.[^.]+$/, "") || "asset";
   return `${stem}${extensionForResult(result)}`;
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function blobForResult(result) {
+  if (result?.svg) {
+    return new Blob([result.svg], { type: result.mime || "image/svg+xml" });
+  }
+  if (result?.dataBase64) {
+    return new Blob([base64ToBytes(result.dataBase64)], {
+      type: result.mime || "application/octet-stream",
+    });
+  }
+  return null;
 }
 
 function isSvgOutput() {
@@ -629,19 +646,19 @@ convertBtn.addEventListener("click", convertAll);
 function exportFile(entry = activeEntry()) {
   if (!entry?.result) return;
 
-  const anchor = document.createElement("a");
-  if (entry.result.svg) {
-    const blob = new Blob([entry.result.svg], { type: "image/svg+xml" });
-    anchor.href = URL.createObjectURL(blob);
-    anchor.addEventListener("click", () => {
-      setTimeout(() => URL.revokeObjectURL(anchor.href), 0);
-    }, { once: true });
-  } else {
-    anchor.href = entry.result.dataUrl;
+  const blob = blobForResult(entry.result);
+  if (!blob) {
+    showToast(t("errors.convertFailed"), true);
+    return;
   }
+
+  const anchor = document.createElement("a");
+  const url = URL.createObjectURL(blob);
   const filename = exportFilename(entry.result);
+  anchor.href = url;
   anchor.download = filename;
   anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
   showToast(t("toast.exported", { filename }));
 }
 
@@ -685,7 +702,7 @@ async function exportAllFiles() {
     anchor.href = url;
     anchor.download = "image-export.zip";
     anchor.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast(t("toast.exportedZip", { count: entries.length }));
   } catch (err) {
     showToast(err.message, true);
