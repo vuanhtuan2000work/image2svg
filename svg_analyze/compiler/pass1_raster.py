@@ -437,6 +437,96 @@ def _mask_bbox_to_svg(x1: int, y1: int, x2: int, y2: int, raster: RasterEvidence
     )
 
 
+def _clamp_bbox_to_frame(bbox: BBox, frame: BBox) -> BBox:
+    x1 = max(frame.x, bbox.x)
+    y1 = max(frame.y, bbox.y)
+    x2 = min(frame.x2, bbox.x2)
+    y2 = min(frame.y2, bbox.y2)
+    return BBox(x1, y1, max(1.0, x2 - x1), max(1.0, y2 - y1))
+
+
+def _looks_like_frame_background(path: NormalizedPath, frame: BBox) -> bool:
+    bbox = path.bbox
+    covers_width = bbox.x <= frame.x + frame.w * 0.04 and bbox.x2 >= frame.x2 - frame.w * 0.04
+    covers_height = bbox.y <= frame.y + frame.h * 0.04 and bbox.y2 >= frame.y2 - frame.h * 0.04
+    covers_area = bbox.area >= frame.area * 0.62
+    overwide = bbox.w >= frame.w * 0.92 and bbox.h >= frame.h * 0.82
+    return covers_area and overwide and covers_width and covers_height
+
+
+def foreground_bbox_from_paths(
+    paths: list[NormalizedPath],
+    frame: BBox,
+    *,
+    padding_ratio: float = 0.035,
+) -> BBox | None:
+    """Tight path bounds for the animal/object, excluding sheet backgrounds."""
+    frame_area = max(frame.area, 1.0)
+    foreground: list[BBox] = []
+
+    for path in paths:
+        if path.bbox.area <= frame_area * 0.00015:
+            continue
+        if _looks_like_frame_background(path, frame):
+            continue
+        if path.bbox.w > frame.w * 1.08 and (
+            path.bbox.area > frame_area * 0.03 or path.bbox.h < frame.h * 0.08
+        ):
+            continue
+        if path.bbox.h > frame.h * 1.08 and (
+            path.bbox.area > frame_area * 0.03 or path.bbox.w < frame.w * 0.08
+        ):
+            continue
+        foreground.append(_clamp_bbox_to_frame(path.bbox, frame))
+
+    if not foreground:
+        fallback = [_clamp_bbox_to_frame(path.bbox, frame) for path in paths if path.bbox.area > 0]
+        if not fallback:
+            return None
+        foreground = fallback
+
+    tight = union_bbox(foreground)
+    if tight is None:
+        return None
+
+    pad_x = tight.w * padding_ratio
+    pad_y = tight.h * padding_ratio
+    return _clamp_bbox_to_frame(tight.expand(max(pad_x, pad_y)), frame)
+
+
+def _component_touches_edge(component: tuple[int, int, int, int, int, int], crop_w: int, crop_h: int, pad: int = 1) -> bool:
+    _, x, y, w, h, _ = component
+    return x <= pad or y <= pad or x + w >= crop_w - pad or y + h >= crop_h - pad
+
+
+def _selected_content_components(crop: Any) -> list[tuple[int, int, int, int, int, int]]:
+    """Keep the dominant in-frame silhouette while dropping small adjacent-frame leaks."""
+    components = _connected_components_2d(crop)
+    if not components:
+        return []
+
+    crop_h, crop_w = crop.shape
+    components.sort(key=lambda c: c[5], reverse=True)
+    primary = components[0]
+    primary_area = max(primary[5], 1)
+    selected = [primary]
+
+    for comp in components[1:]:
+        _, x, y, w, h, area = comp
+        area_ratio = area / primary_area
+        edge_sliver = (
+            _component_touches_edge(comp, crop_w, crop_h)
+            and area_ratio < 0.22
+            and (w < crop_w * 0.22 or h < crop_h * 0.22)
+        )
+        if edge_sliver:
+            continue
+        if area_ratio >= 0.08:
+            selected.append(comp)
+
+    return selected
+
+
 def tight_content_bbox_for_frame(
     raster: RasterEvidence | None,
     frame_bbox: BBox,
@@ -448,22 +538,38 @@ def tight_content_bbox_for_frame(
     if raster is None or raster.alpha_mask is None:
         return None
 
-    crop = crop_alpha_to_bbox(raster, frame_bbox, view_box)
+    sx1, sy1, sx2, sy2 = _mask_slice_for_bbox(raster, frame_bbox, view_box)
+    if sx2 <= sx1 or sy2 <= sy1:
+        return None
+
+    crop = raster.alpha_mask[sy1:sy2, sx1:sx2].copy()
     if crop is None or not crop.any():
         return None
 
-    ys, xs = np.where(crop)
-    y1, y2 = int(ys.min()), int(ys.max()) + 1
-    x1, x2 = int(xs.min()), int(xs.max()) + 1
-    tight = _mask_bbox_to_svg(x1, y1, x2, y2, raster, view_box)
+    selected = _selected_content_components(crop)
+    if selected:
+        x1 = min(c[1] for c in selected)
+        y1 = min(c[2] for c in selected)
+        x2 = max(c[1] + c[3] for c in selected)
+        y2 = max(c[2] + c[4] for c in selected)
+    else:
+        ys, xs = np.where(crop)
+        y1, y2 = int(ys.min()), int(ys.max()) + 1
+        x1, x2 = int(xs.min()), int(xs.max()) + 1
+
+    tight = _mask_bbox_to_svg(sx1 + x1, sy1 + y1, sx1 + x2, sy1 + y2, raster, view_box)
 
     pad_x = tight.w * padding_ratio
     pad_y = tight.h * padding_ratio
+    x = max(frame_bbox.x, tight.x - pad_x)
+    y = max(frame_bbox.y, tight.y - pad_y)
+    x2 = min(frame_bbox.x2, tight.x2 + pad_x)
+    y2 = min(frame_bbox.y2, tight.y2 + pad_y)
     return BBox(
-        max(frame_bbox.x, tight.x - pad_x),
-        max(frame_bbox.y, tight.y - pad_y),
-        min(frame_bbox.w + pad_x * 2, tight.w + pad_x * 2),
-        min(frame_bbox.h + pad_y * 2, tight.h + pad_y * 2),
+        x,
+        y,
+        max(1.0, x2 - x),
+        max(1.0, y2 - y),
     )
 
 
@@ -503,12 +609,16 @@ def frame_bboxes_from_top_components(
     bboxes: list[BBox] = []
     for _, x, y, w, h, _ in main:
         bbox = svg_to_mask_bbox((0, x, y, w, h, 0), raster, view_box)
+        x1 = max(vx, bbox.x - pad_x)
+        y1 = max(vy, bbox.y - pad_y)
+        x2 = min(vx + vw, bbox.x2 + pad_x)
+        y2 = min(vy + vh, bbox.y2 + pad_y)
         bboxes.append(
             BBox(
-                max(vx, bbox.x - pad_x),
-                max(vy, bbox.y - pad_y),
-                min(vw, bbox.w + pad_x * 2),
-                min(vh, bbox.h + pad_y * 2),
+                x1,
+                y1,
+                max(1.0, x2 - x1),
+                max(1.0, y2 - y1),
             )
         )
     return bboxes

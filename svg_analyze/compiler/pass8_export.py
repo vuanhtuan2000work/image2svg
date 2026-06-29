@@ -4,11 +4,59 @@ from __future__ import annotations
 
 from typing import Any
 
-from svg_analyze.compiler.pass1_raster import tight_content_bbox_for_frame
+from svg_analyze.compiler.pass1_raster import foreground_bbox_from_paths, tight_content_bbox_for_frame
 from svg_analyze.geometry import BBox, frame_to_core_matrix, union_bbox
 from svg_analyze.export.phaser_manifest import build_game_manifest_from_export
 from svg_analyze.legacy_pipeline import _frame_quality, _guess_background
 from svg_analyze.types import CompilerState, FrameSplitCandidate, FrameSplitScoreBreakdown, LandmarkCandidate
+
+AP10K_EDGES = [
+    ("Nose", "Neck"),
+    ("Neck", "L_Shoulder"),
+    ("Neck", "R_Shoulder"),
+    ("L_Shoulder", "L_Elbow"),
+    ("L_Elbow", "L_F_Paw"),
+    ("R_Shoulder", "R_Elbow"),
+    ("R_Elbow", "R_F_Paw"),
+    ("Neck", "Root_of_tail"),
+    ("Root_of_tail", "Tail"),
+    ("Root_of_tail", "L_Hip"),
+    ("Root_of_tail", "R_Hip"),
+    ("L_Hip", "L_Knee"),
+    ("L_Knee", "L_B_Paw"),
+    ("R_Hip", "R_Knee"),
+    ("R_Knee", "R_B_Paw"),
+    ("Nose", "L_Eye"),
+    ("Nose", "R_Eye"),
+]
+
+LANDMARK_TO_AP10K = {
+    "leftEye": "L_Eye",
+    "rightEye": "R_Eye",
+    "nose": "Nose",
+    "neck": "Neck",
+    "tailRoot": "Root_of_tail",
+    "tailTip": "Tail",
+    "frontLeftShoulder": "L_Shoulder",
+    "frontRightShoulder": "R_Shoulder",
+    "frontLeftPaw": "L_F_Paw",
+    "frontRightPaw": "R_F_Paw",
+    "backLeftHip": "L_Hip",
+    "backRightHip": "R_Hip",
+    "backLeftPaw": "L_B_Paw",
+    "backRightPaw": "R_B_Paw",
+}
+
+
+AP10K_EDGE_LIMITS = {
+    ("Nose", "Neck"): 0.34,
+    ("Nose", "L_Eye"): 0.24,
+    ("Nose", "R_Eye"): 0.24,
+    ("Neck", "Root_of_tail"): 0.76,
+    ("Root_of_tail", "Tail"): 0.46,
+}
+
+AP10K_EDGE_MIN_CONFIDENCE = 0.38
 
 
 def _selected_landmarks(candidates: dict[str, list[LandmarkCandidate]]) -> dict[str, Any]:
@@ -26,6 +74,169 @@ def _selected_landmarks(candidates: dict[str, list[LandmarkCandidate]]) -> dict[
         }
         out[f"{name}Candidates"] = [c.as_dict() for c in sorted(items, key=lambda c: c.confidence, reverse=True)[:5]]
     return out
+
+
+def _core_point_to_global(point: dict[str, Any], core_bbox: BBox) -> dict[str, float]:
+    return {
+        "x": core_bbox.x + float(point.get("x", 0.5)) * core_bbox.w,
+        "y": core_bbox.y + float(point.get("y", 0.5)) * core_bbox.h,
+    }
+
+
+def _point_in_bbox(point: dict[str, float], bbox: BBox, *, margin_ratio: float = 0.08) -> bool:
+    margin = max(bbox.w, bbox.h) * margin_ratio
+    return (
+        bbox.x - margin <= point["x"] <= bbox.x2 + margin
+        and bbox.y - margin <= point["y"] <= bbox.y2 + margin
+    )
+
+
+def _edge_is_plausible(a: dict[str, Any], b: dict[str, Any], content_bbox: BBox, frame_bbox: BBox) -> bool:
+    if min(float(a.get("confidence", 0.0)), float(b.get("confidence", 0.0))) < AP10K_EDGE_MIN_CONFIDENCE:
+        return False
+    if not _point_in_bbox(a, frame_bbox, margin_ratio=0.02) or not _point_in_bbox(b, frame_bbox, margin_ratio=0.02):
+        return False
+    distance = ((float(a["x"]) - float(b["x"])) ** 2 + (float(a["y"]) - float(b["y"])) ** 2) ** 0.5
+    diagonal = max(1.0, (content_bbox.w**2 + content_bbox.h**2) ** 0.5)
+    limit = AP10K_EDGE_LIMITS.get((a["label"], b["label"]), 0.62)
+    return distance <= diagonal * limit
+
+
+def _add_pose_keypoint(
+    keypoints: dict[str, dict[str, Any]],
+    *,
+    label: str,
+    point: dict[str, float],
+    confidence: float,
+    source: str,
+    frame_bbox: BBox,
+    priority: int,
+    generated: bool = False,
+) -> None:
+    if not label or point.get("x") is None or point.get("y") is None:
+        return
+    if not _point_in_bbox(point, frame_bbox, margin_ratio=0.04):
+        return
+    prev = keypoints.get(label)
+    if prev and int(prev.get("_priority", 0)) > priority:
+        return
+    if prev and int(prev.get("_priority", 0)) == priority and float(prev.get("confidence", 0.0)) >= confidence:
+        return
+    keypoints[label] = {
+        "label": label,
+        "x": round(float(point["x"]), 2),
+        "y": round(float(point["y"]), 2),
+        "coordinate": "globalSvg",
+        "confidence": round(confidence, 4),
+        "source": source,
+        "generated": generated,
+        "_priority": priority,
+    }
+
+
+def _pose_preview(
+    frame_index: int,
+    landmarks: dict[str, Any],
+    skeleton: dict[str, Any],
+    core_bbox: BBox,
+    content_bbox: BBox,
+    frame_bbox: BBox,
+    ml_landmarks: dict[str, Any] | None,
+) -> dict[str, Any]:
+    keypoints: dict[str, dict[str, Any]] = {}
+
+    ml_backend = (ml_landmarks or {}).get("backend") or ""
+    ml_is_pose_backend = "mmpose" in ml_backend.lower()
+    ml_points = (ml_landmarks or {}).get("keypoints", []) if (ml_landmarks or {}).get("status") == "ok" and ml_is_pose_backend else []
+    for kp in ml_points:
+        raw_label = kp.get("sourceLabel") or kp.get("label") or LANDMARK_TO_AP10K.get(kp.get("name"))
+        label = LANDMARK_TO_AP10K.get(raw_label, raw_label)
+        if label not in {label for edge in AP10K_EDGES for label in edge}:
+            continue
+        _add_pose_keypoint(
+            keypoints,
+            label=label,
+            point={"x": float(kp.get("x", 0.0)), "y": float(kp.get("y", 0.0))},
+            confidence=float(kp.get("confidence", 0.5)),
+            source=ml_backend,
+            frame_bbox=frame_bbox,
+            priority=100,
+        )
+
+    for name, label in LANDMARK_TO_AP10K.items():
+        raw = landmarks.get(name)
+        if not isinstance(raw, dict) or raw.get("x") is None or label in keypoints:
+            continue
+        if not ml_is_pose_backend and label not in {"L_Eye", "R_Eye", "Neck", "Nose"}:
+            continue
+        point = _core_point_to_global(raw, core_bbox) if raw.get("coordinate") == "coreLocal" else raw
+        _add_pose_keypoint(
+            keypoints,
+            label=label,
+            point={"x": float(point.get("x", 0.0)), "y": float(point.get("y", 0.0))},
+            confidence=float(raw.get("confidence", 0.45)),
+            source=raw.get("source", "compiler"),
+            frame_bbox=frame_bbox,
+            priority=70,
+        )
+
+    bones = skeleton.get("bones") or {}
+    fallback_bones = (("neck", "Neck"), ("tail", "Root_of_tail")) if ml_is_pose_backend else (("neck", "Neck"),)
+    for bone_name, label in fallback_bones:
+        bone = bones.get(bone_name) or {}
+        root = bone.get("root")
+        if isinstance(root, dict) and label not in keypoints:
+            point = _core_point_to_global(root, core_bbox)
+            _add_pose_keypoint(
+                keypoints,
+                label=label,
+                point=point,
+                confidence=float(bone.get("confidence", 0.4)),
+                source="skeleton",
+                frame_bbox=frame_bbox,
+                priority=55,
+                generated=True,
+            )
+
+    if "Nose" not in keypoints and isinstance(landmarks.get("headCenter"), dict):
+        raw_head = landmarks["headCenter"]
+        point = _core_point_to_global(raw_head, core_bbox) if raw_head.get("coordinate") == "coreLocal" else raw_head
+        _add_pose_keypoint(
+            keypoints,
+            label="Nose",
+            point={"x": float(point.get("x", 0.0)), "y": float(point.get("y", 0.0))},
+            confidence=min(0.36, float(raw_head.get("confidence", 0.36))),
+            source="estimatedHeadCenter",
+            frame_bbox=frame_bbox,
+            priority=30,
+            generated=True,
+        )
+
+    available_edges = [
+        {
+            "from": a,
+            "to": b,
+            "confidence": round(min(float(keypoints[a].get("confidence", 0.0)), float(keypoints[b].get("confidence", 0.0))), 4),
+        }
+        for a, b in AP10K_EDGES
+        if a in keypoints and b in keypoints and _edge_is_plausible(keypoints[a], keypoints[b], content_bbox, frame_bbox)
+    ]
+
+    public_keypoints = []
+    for item in keypoints.values():
+        item = dict(item)
+        item.pop("_priority", None)
+        public_keypoints.append(item)
+
+    return {
+        "profile": "AP-10K compatible Animal 2D Keypoint preview",
+        "dataset": "AP10KDataset",
+        "frameIndex": frame_index,
+        "backend": ml_backend if ml_is_pose_backend else "compiler-heuristic",
+        "keypoints": sorted(public_keypoints, key=lambda item: item["label"]),
+        "edges": available_edges,
+        "missingLabels": sorted({label for edge in AP10K_EDGES for label in edge} - set(keypoints)),
+    }
 
 
 def _build_frame_analysis_legacy(
@@ -46,13 +257,14 @@ def _build_frame_analysis_legacy(
     landmarks = _selected_landmarks(lm_candidates)
     components = state.frame_components.get(frame_index, [])
 
-    content_paths = paths
-    path_content = union_bbox(p.bbox for p in content_paths) or frame_bbox
+    path_content = foreground_bbox_from_paths(paths, frame_bbox) or union_bbox(p.bbox for p in paths) or frame_bbox
     content = path_content
     if state.raster is not None:
         raster_content = tight_content_bbox_for_frame(state.raster, frame_bbox, state.view_box)
         if raster_content is not None:
-            content = raster_content
+            raster_is_full_frame = raster_content.area >= frame_bbox.area * 0.92
+            path_is_tighter = path_content.area < raster_content.area * 0.92
+            content = path_content if raster_is_full_frame and path_is_tighter else raster_content
         elif path_content.w > frame_bbox.w * 1.2:
             content = frame_bbox
     silhouette = content
@@ -107,6 +319,15 @@ def _build_frame_analysis_legacy(
         "landmarks": landmarks,
         "landmarkCandidates": {k: [c.as_dict() for c in v] for k, v in lm_candidates.items()},
         "mlLandmarks": state.frame_ml_landmarks.get(frame_index),
+        "posePreview": _pose_preview(
+            frame_index,
+            landmarks,
+            skeleton,
+            core.bbox,
+            content,
+            frame_bbox,
+            state.frame_ml_landmarks.get(frame_index),
+        ),
         "skeleton": skeleton,
         "partZones": {"zones": {}},
         "semanticParts": semantic_parts,

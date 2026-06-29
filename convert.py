@@ -1,16 +1,28 @@
 import argparse
+import base64
+import html
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
 import vtracer
 import yaml
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageFilter
+
+from background_removal import get_last_background_engine, remove_background
+
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+except Exception:
+    pillow_heif = None
 
 ROOT = Path(__file__).parent
 RAW_DIR = ROOT / "assets" / "raw"
@@ -42,6 +54,41 @@ SMOOTHING_PRESETS = {
     "high": {"upscale": 4, "blur": 0.0},
 }
 DEFAULT_SMOOTHING = "medium"
+OUTPUT_FORMATS = ("jpg", "jpeg", "png", "webp", "avif", "gif", "svg", "bmp", "tiff", "heic")
+SVG_MODES = ("embedded", "vector")
+RASTER_OUTPUT_FORMATS = tuple(fmt for fmt in OUTPUT_FORMATS if fmt != "svg")
+RASTER_MIME_TYPES = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+    "avif": "image/avif",
+    "gif": "image/gif",
+    "bmp": "image/bmp",
+    "tiff": "image/tiff",
+    "heic": "image/heic",
+}
+PIL_SAVE_FORMATS = {
+    "jpg": "JPEG",
+    "jpeg": "JPEG",
+    "png": "PNG",
+    "webp": "WEBP",
+    "avif": "AVIF",
+    "gif": "GIF",
+    "bmp": "BMP",
+    "tiff": "TIFF",
+    "heic": "HEIF",
+}
+NO_ALPHA_OUTPUTS = {"jpg", "jpeg", "bmp"}
+
+
+@dataclass(frozen=True)
+class TracePlan:
+    image_bytes: bytes
+    suffix: str
+    params: dict
+    orig_size: tuple[int, int] | None
+    upscale: int
 
 
 def load_recipes() -> dict:
@@ -113,99 +160,6 @@ def _detect_bg_color(img: "Image.Image") -> tuple[int, int, int]:
     return tuple(int(sorted(c)[len(c) // 2]) for c in channels)  # type: ignore[return-value]
 
 
-def remove_background(img: "Image.Image", *, tolerance: int = 32) -> "Image.Image":
-    """Xóa nền: flood-fill từ viền các pixel gần màu nền -> alpha = 0.
-
-    Dùng flood-fill (chỉ vùng nền nối liền với viền) nên các vùng sáng/trắng NẰM
-    TRONG object (lòng trắng mắt, highlight) được giữ lại.
-    """
-    img = img.convert("RGBA")
-    w, h = img.size
-    bg = _detect_bg_color(img)
-
-    # Sentinel khác hẳn màu nền để không trùng nội dung.
-    sentinel = (255, 0, 255) if bg != (255, 0, 255) else (0, 255, 0)
-    work = img.convert("RGB")
-
-    seeds: list[tuple[int, int]] = []
-    step_x = max(1, w // 30)
-    step_y = max(1, h // 30)
-    for x in range(0, w, step_x):
-        seeds.extend([(x, 0), (x, h - 1)])
-    for y in range(0, h, step_y):
-        seeds.extend([(0, y), (w - 1, y)])
-
-    for seed in seeds:
-        if work.getpixel(seed) == sentinel:
-            continue
-        ImageDraw.floodfill(work, seed, sentinel, thresh=tolerance)
-
-    # bg_mask: pixel == sentinel -> nền
-    diff = ImageChops.difference(work, Image.new("RGB", img.size, sentinel)).convert("L")
-    bg_mask = diff.point(lambda p: 255 if p == 0 else 0)  # 255 ở vùng nền
-
-    alpha = img.getchannel("A")
-    alpha = ImageChops.subtract(alpha, bg_mask)  # set 0 ở vùng nền
-    img.putalpha(alpha)
-
-    # Bỏ các mảnh rời rạc còn sót (viền/vệt sáng của thẻ...) -> chỉ giữ object chính.
-    img = _keep_main_components(img, min_ratio=0.10)
-    return img
-
-
-def _keep_main_components(img: "Image.Image", *, min_ratio: float = 0.10) -> "Image.Image":
-    """Giữ các vùng đục (alpha>0) đủ lớn, xoá mảnh nhỏ rời rạc.
-
-    Gán nhãn connected-component (4-hướng) trên mask alpha rồi giữ những component có
-    diện tích >= min_ratio * (component lớn nhất). Loại bỏ thanh/vụn nổi quanh object.
-    """
-    img = img.convert("RGBA")
-    w, h = img.size
-    alpha = img.getchannel("A")
-    fg = [1 if v > 8 else 0 for v in alpha.getdata()]
-
-    labels = [0] * (w * h)
-    sizes: list[int] = [0]  # index 0 = nền
-    current = 0
-    for start in range(w * h):
-        if fg[start] == 0 or labels[start] != 0:
-            continue
-        current += 1
-        count = 0
-        stack = [start]
-        labels[start] = current
-        while stack:
-            idx = stack.pop()
-            count += 1
-            x, y = idx % w, idx // w
-            if x > 0 and fg[idx - 1] and labels[idx - 1] == 0:
-                labels[idx - 1] = current
-                stack.append(idx - 1)
-            if x < w - 1 and fg[idx + 1] and labels[idx + 1] == 0:
-                labels[idx + 1] = current
-                stack.append(idx + 1)
-            if y > 0 and fg[idx - w] and labels[idx - w] == 0:
-                labels[idx - w] = current
-                stack.append(idx - w)
-            if y < h - 1 and fg[idx + w] and labels[idx + w] == 0:
-                labels[idx + w] = current
-                stack.append(idx + w)
-        sizes.append(count)
-
-    if current <= 1:
-        return img
-
-    threshold = max(sizes) * min_ratio
-    keep = {i for i in range(1, current + 1) if sizes[i] >= threshold}
-
-    old_alpha = list(alpha.getdata())
-    new_alpha = bytes(
-        old_alpha[i] if labels[i] in keep else 0 for i in range(w * h)
-    )
-    img.putalpha(Image.frombytes("L", (w, h), new_alpha))
-    return img
-
-
 def trim_to_content(img: "Image.Image") -> "Image.Image":
     """Cắt sát nội dung (bỏ padding). Ưu tiên alpha, fallback theo màu nền."""
     img = img.convert("RGBA")
@@ -268,6 +222,109 @@ def preprocess_image(
     return buf.getvalue(), orig_size
 
 
+def _flatten_alpha(img: "Image.Image", background: tuple[int, int, int] = (255, 255, 255)) -> "Image.Image":
+    img = img.convert("RGBA")
+    canvas = Image.new("RGBA", img.size, (*background, 255))
+    return Image.alpha_composite(canvas, img).convert("RGB")
+
+
+def _save_raster_image(img: "Image.Image", output_type: str) -> bytes:
+    output_type = output_type.lower()
+    if output_type not in RASTER_OUTPUT_FORMATS:
+        raise ValueError(f"Định dạng output không hỗ trợ: {output_type}")
+
+    save_format = PIL_SAVE_FORMATS[output_type]
+    save_img = _flatten_alpha(img) if output_type in NO_ALPHA_OUTPUTS else img.convert("RGBA")
+    save_kwargs: dict = {}
+
+    if output_type in {"jpg", "jpeg"}:
+        save_kwargs.update({"quality": 95, "optimize": True, "progressive": True})
+    elif output_type == "webp":
+        save_kwargs.update({"quality": 95, "method": 6})
+    elif output_type == "avif":
+        save_kwargs.update({"quality": 95})
+    elif output_type == "heic":
+        save_kwargs.update({"quality": 95})
+
+    if output_type == "gif":
+        save_img = save_img.convert("RGBA")
+
+    buf = BytesIO()
+    try:
+        save_img.save(buf, format=save_format, **save_kwargs)
+    except Exception as exc:
+        raise RuntimeError(f"Không thể xuất {output_type.upper()}: {exc}") from exc
+    return buf.getvalue()
+
+
+def _png_bytes_for_svg_embed(img: "Image.Image") -> bytes:
+    buf = BytesIO()
+    img.convert("RGBA").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _svg_embed_image(png_bytes: bytes, width: int, height: int) -> str:
+    href = base64.b64encode(png_bytes).decode("ascii")
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {width} {height}" width="{width}" height="{height}">'
+        f'<image href="data:image/png;base64,{html.escape(href, quote=True)}" '
+        f'width="{width}" height="{height}" preserveAspectRatio="xMidYMid meet"/>'
+        "</svg>"
+    )
+
+
+def convert_embedded_svg_bytes(
+    image_bytes: bytes,
+    *,
+    remove_bg: bool = False,
+    trim: bool = False,
+) -> tuple[str, dict, str, float]:
+    """Wrap the image in SVG without vector tracing, preserving raster colors."""
+    t0 = time.time()
+    img = Image.open(BytesIO(image_bytes)).convert("RGBA")
+
+    if remove_bg:
+        img = remove_background(img)
+
+    if trim:
+        img = trim_to_content(img)
+
+    png_bytes = _png_bytes_for_svg_embed(img)
+    svg = _svg_embed_image(png_bytes, img.width, img.height)
+    report = {
+        "svg_mode": "embedded",
+        "source": "embedded-raster",
+        "remove_bg": remove_bg,
+        "trim": trim,
+    }
+    if remove_bg:
+        report["remove_bg_engine"] = get_last_background_engine()
+    return svg, report, "none", time.time() - t0
+
+
+def convert_raster_image_bytes(
+    image_bytes: bytes,
+    *,
+    output_type: str,
+) -> tuple[bytes, dict, str, str, float]:
+    """Transcode original image bytes to a raster format without SVG preprocessing."""
+    output_type = output_type.lower()
+    if output_type not in RASTER_OUTPUT_FORMATS:
+        raise ValueError(f"Định dạng output không hỗ trợ: {output_type}")
+
+    t0 = time.time()
+    img = Image.open(BytesIO(image_bytes)).convert("RGBA")
+    payload = _save_raster_image(img, output_type)
+    report = {
+        "format": output_type,
+        "source": "original-image",
+    }
+    if output_type in NO_ALPHA_OUTPUTS and img.mode == "RGBA":
+        report["flattened_background"] = "white"
+    return payload, report, RASTER_MIME_TYPES[output_type], output_type, time.time() - t0
+
+
 def _scale_params_for_upscale(params: dict, upscale: int) -> dict:
     """Scale ngưỡng theo upscale (tuyến tính) để giữ chi tiết nhỏ sau khi phóng to.
 
@@ -284,6 +341,81 @@ def _scale_params_for_upscale(params: dict, upscale: int) -> dict:
     return out
 
 
+def _params_for_part(part: str, recipes: dict) -> dict:
+    if part == "default":
+        return {k: v for k, v in (recipes.get("default") or {}).items() if k in VTRACER_KEYS}
+    return recipe_for(part, recipes)
+
+
+def _apply_color_precision(params: dict, color_precision: int | None) -> dict:
+    if color_precision is None:
+        return params
+    out = dict(params)
+    # vtracer color_precision = số bit/kênh, hợp lệ 1..8 (cao = nhiều màu/chuẩn hơn).
+    out["color_precision"] = max(1, min(8, int(color_precision)))
+    return out
+
+
+def _trace_preset(smoothing: str) -> tuple[int, float]:
+    preset = SMOOTHING_PRESETS.get(smoothing, SMOOTHING_PRESETS["none"])
+    return preset["upscale"], preset["blur"]
+
+
+def _prepare_trace_plan(
+    image_bytes: bytes,
+    *,
+    suffix: str,
+    params: dict,
+    smoothing: str,
+    sharpness: int,
+    remove_bg: bool,
+    trim: bool,
+) -> TracePlan:
+    upscale, blur = _trace_preset(smoothing)
+    needs_pre = upscale > 1 or blur > 0 or sharpness > 0 or remove_bg or trim
+
+    if not needs_pre:
+        return TracePlan(
+            image_bytes=image_bytes,
+            suffix=suffix,
+            params=params,
+            orig_size=None,
+            upscale=upscale,
+        )
+
+    trace_bytes, orig_size = preprocess_image(
+        image_bytes,
+        upscale=upscale,
+        blur=blur,
+        sharpen=sharpness,
+        remove_bg=remove_bg,
+        trim=trim,
+    )
+    return TracePlan(
+        image_bytes=trace_bytes,
+        suffix=".png",
+        params=_scale_params_for_upscale(params, upscale),
+        orig_size=orig_size,
+        upscale=upscale,
+    )
+
+
+def _write_trace_plan(plan: TracePlan, dst: Path) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_src = Path(tmp) / f"input{plan.suffix}"
+        tmp_src.write_bytes(plan.image_bytes)
+        vtracer.convert_image_to_svg_py(str(tmp_src), str(dst), **plan.params)
+
+
+def _trace_plan_to_svg(plan: TracePlan, optimizer: str) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        dst = Path(tmp) / "output.svg"
+        _write_trace_plan(plan, dst)
+        if optimizer != "none":
+            optimize(dst, optimizer)
+        return dst.read_text(encoding="utf-8")
+
+
 def convert_one(
     src: Path,
     dst: Path,
@@ -296,26 +428,20 @@ def convert_one(
     trim: bool = False,
 ) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
-    preset = SMOOTHING_PRESETS.get(smoothing, SMOOTHING_PRESETS["none"])
-    upscale, blur = preset["upscale"], preset["blur"]
-    needs_pre = upscale > 1 or blur > 0 or sharpness > 0 or remove_bg or trim
+    plan = _prepare_trace_plan(
+        src.read_bytes(),
+        suffix=src.suffix.lower() or ".png",
+        params=params,
+        smoothing=smoothing,
+        sharpness=sharpness,
+        remove_bg=remove_bg,
+        trim=trim,
+    )
 
-    if needs_pre:
-        png_bytes, orig_size = preprocess_image(
-            src.read_bytes(),
-            upscale=upscale,
-            blur=blur,
-            sharpen=sharpness,
-            remove_bg=remove_bg,
-            trim=trim,
-        )
-        scaled = _scale_params_for_upscale(params, upscale)
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_src = Path(tmp) / "pre.png"
-            tmp_src.write_bytes(png_bytes)
-            vtracer.convert_image_to_svg_py(str(tmp_src), str(dst), **scaled)
+    if plan.orig_size is not None:
+        _write_trace_plan(plan, dst)
         dst.write_text(
-            _normalize_svg_size(dst.read_text(encoding="utf-8"), orig_size[0], orig_size[1]),
+            _normalize_svg_size(dst.read_text(encoding="utf-8"), plan.orig_size[0], plan.orig_size[1]),
             encoding="utf-8",
         )
     else:
@@ -368,54 +494,32 @@ def convert_image_bytes(
 ) -> tuple[str, dict, str, float]:
     """Trace PNG bytes to SVG text. Returns (svg, params, optimizer, elapsed_s)."""
     data = recipes if recipes is not None else load_recipes()
-    if part == "default":
-        params = {k: v for k, v in (data.get("default") or {}).items() if k in VTRACER_KEYS}
-    else:
-        params = recipe_for(part, data)
-
-    if color_precision is not None:
-        # vtracer color_precision = số bit/kênh, hợp lệ 1..8 (cao = nhiều màu/chuẩn hơn).
-        params["color_precision"] = max(1, min(8, int(color_precision)))
-
+    params = _apply_color_precision(_params_for_part(part, data), color_precision)
     opt = optimizer if optimizer is not None else detect_optimizer()
-    preset = SMOOTHING_PRESETS.get(smoothing, SMOOTHING_PRESETS["none"])
-    upscale, blur = preset["upscale"], preset["blur"]
     t0 = time.time()
 
-    needs_pre = upscale > 1 or blur > 0 or sharpness > 0 or remove_bg or trim
-    trace_bytes = image_bytes
-    orig_size: tuple[int, int] | None = None
-    trace_params = params
-    if needs_pre:
-        trace_bytes, orig_size = preprocess_image(
-            image_bytes,
-            upscale=upscale,
-            blur=blur,
-            sharpen=sharpness,
-            remove_bg=remove_bg,
-            trim=trim,
-        )
-        trace_params = _scale_params_for_upscale(params, upscale)
-        suffix = ".png"
-
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / f"input{suffix}"
-        dst = Path(tmp) / "output.svg"
-        src.write_bytes(trace_bytes)
-        vtracer.convert_image_to_svg_py(str(src), str(dst), **trace_params)
-        if opt != "none":
-            optimize(dst, opt)
-        svg = dst.read_text(encoding="utf-8")
+    plan = _prepare_trace_plan(
+        image_bytes,
+        suffix=suffix,
+        params=params,
+        smoothing=smoothing,
+        sharpness=sharpness,
+        remove_bg=remove_bg,
+        trim=trim,
+    )
+    svg = _trace_plan_to_svg(plan, opt)
 
     # Sau preprocess, ép width/height + viewBox về kích thước nội dung (đã trim).
-    if orig_size is not None:
-        svg = _normalize_svg_size(svg, orig_size[0], orig_size[1])
+    if plan.orig_size is not None:
+        svg = _normalize_svg_size(svg, plan.orig_size[0], plan.orig_size[1])
 
     report = dict(params)
     report["smoothing"] = smoothing
-    report["upscale"] = upscale
+    report["upscale"] = plan.upscale
     report["sharpness"] = sharpness
     report["remove_bg"] = remove_bg
+    if remove_bg:
+        report["remove_bg_engine"] = get_last_background_engine()
     report["trim"] = trim
     return svg, report, opt, time.time() - t0
 

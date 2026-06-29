@@ -22,6 +22,9 @@ const mmposeToggle = document.getElementById("mmposeToggle");
 const assetPathInput = document.getElementById("assetPathInput");
 const gameRootInput = document.getElementById("gameRootInput");
 const exportStatus = document.getElementById("exportStatus");
+const terminalSummary = document.getElementById("terminalSummary");
+const terminalLog = document.getElementById("terminalLog");
+const clearTerminalBtn = document.getElementById("clearTerminalBtn");
 
 let selectedFile = null;
 let svgSourceText = "";
@@ -30,6 +33,109 @@ let activeLayer = "assetAnalysis";
 let analyzing = false;
 let exporting = false;
 let defaultGameRoot = "";
+
+function formatElapsed(ms = 0) {
+  return `${(Number(ms || 0) / 1000).toFixed(2)}s`;
+}
+
+function terminalDetail(event) {
+  const parts = [];
+  if (event.frameIndex !== undefined && event.frameCount) {
+    parts.push(`frame ${Number(event.frameIndex) + 1}/${event.frameCount}`);
+  }
+  if (event.method) parts.push(`method=${event.method}`);
+  if (event.score !== undefined) parts.push(`score=${event.score}`);
+  if (event.pathCount !== undefined) parts.push(`paths=${event.pathCount}`);
+  if (event.rasterWidth && event.rasterHeight) {
+    parts.push(`raster=${event.rasterWidth}x${event.rasterHeight}`);
+  }
+  if (event.mmposeStatus?.reason) {
+    parts.push(`mmpose=${event.mmposeStatus.reason}`);
+  }
+  if (event.warnings?.length) {
+    parts.push(`warnings=${event.warnings.length}`);
+  }
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+
+function appendTerminal(event) {
+  const line = document.createElement("div");
+  const level = event.level || (event.type === "error" ? "error" : "info");
+  line.className = `terminal-line ${level}`;
+
+  const time = document.createElement("span");
+  time.className = "terminal-time";
+  time.textContent = formatElapsed(event.elapsedMs);
+
+  const step = document.createElement("span");
+  step.className = "terminal-step";
+  step.textContent = event.step || event.type || "log";
+
+  const message = document.createElement("span");
+  message.className = "terminal-message";
+  message.textContent = `${event.message || event.detail || ""}${terminalDetail(event)}`;
+
+  line.append(time, step, message);
+  terminalLog.append(line);
+  terminalLog.scrollTop = terminalLog.scrollHeight;
+  terminalSummary.textContent = message.textContent || "running";
+}
+
+function resetTerminal(message = "idle") {
+  terminalLog.replaceChildren();
+  terminalSummary.textContent = message;
+}
+
+function handleStreamEvent(event) {
+  if (!event || typeof event !== "object") return null;
+  if (event.type === "log") {
+    appendTerminal(event);
+    return null;
+  }
+  if (event.type === "error") {
+    appendTerminal({ ...event, level: "error", step: "error", message: event.detail || "Phân tích thất bại" });
+    throw new Error(event.detail || "Phân tích thất bại");
+  }
+  if (event.type === "result") {
+    appendTerminal({ type: "log", level: "success", step: "done", message: "Analysis result received" });
+    return event.result;
+  }
+  return null;
+}
+
+async function readNdjsonStream(res) {
+  if (!res.body) {
+    throw new Error("Trình duyệt không hỗ trợ stream response");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResult = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const maybeResult = handleStreamEvent(JSON.parse(line));
+      if (maybeResult) finalResult = maybeResult;
+    }
+  }
+
+  if (buffer.trim()) {
+    const maybeResult = handleStreamEvent(JSON.parse(buffer));
+    if (maybeResult) finalResult = maybeResult;
+  }
+
+  if (!finalResult) {
+    throw new Error("Stream kết thúc nhưng không có kết quả phân tích");
+  }
+  return finalResult;
+}
 
 function showToast(message, isError = false) {
   toast.textContent = message;
@@ -65,11 +171,14 @@ function guessAssetPath(filename) {
   return filename;
 }
 
-function buildAnalyzeFormData() {
+function buildAnalyzeFormData(focusFrames = []) {
   const form = new FormData();
   form.append("file", selectedFile);
   form.append("ml_landmarks", mlLandmarksToggle.checked ? "true" : "false");
   form.append("mmpose", mmposeToggle.checked ? "true" : "false");
+  if (focusFrames.length) {
+    form.append("focus_frames", focusFrames.join(","));
+  }
   return form;
 }
 
@@ -97,6 +206,8 @@ function setFile(file) {
   downloadManifestBtn.disabled = true;
   copyJsonBtn.disabled = true;
   setExportStatus("");
+  resetTerminal("ready");
+  appendTerminal({ step: "file", message: `Loaded ${file.name}`, elapsedMs: 0 });
 }
 
 dropzone.addEventListener("click", () => fileInput.click());
@@ -212,7 +323,7 @@ function afterAnalysis(data) {
   analyzeStatus.textContent = `Score ${data.qualityReport.score} · ${data.stripAnalysis.frameCount} frames · game ${ready}`;
 }
 
-async function runAnalysis() {
+async function runAnalysis({ focusFrames = [] } = {}) {
   if (!selectedFile || analyzing) return;
 
   analyzing = true;
@@ -221,18 +332,28 @@ async function runAnalysis() {
   analyzeBtn.textContent = "Đang phân tích…";
   analyzeStatus.textContent = "Đang phân tích…";
   setExportStatus("");
+  resetTerminal("running");
+  appendTerminal({
+    step: "request",
+    message: `POST /api/analyze-stream · ML=${mlLandmarksToggle.checked ? "on" : "off"} · MMPose=${mmposeToggle.checked ? "on" : "off"}${focusFrames.length ? ` · focus frames=${focusFrames.join(",")}` : ""}`,
+    elapsedMs: 0,
+  });
 
   try {
-    const res = await fetch("/api/analyze", { method: "POST", body: buildAnalyzeFormData() });
-    const data = await res.json();
+    const res = await fetch("/api/analyze-stream", { method: "POST", body: buildAnalyzeFormData(focusFrames) });
     if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
       const detail = Array.isArray(data.detail)
         ? data.detail.map((item) => item.msg).join(", ")
         : data.detail;
       throw new Error(detail || "Phân tích thất bại");
     }
 
+    const data = await readNdjsonStream(res);
     afterAnalysis(data);
+    if (focusFrames.length && window.SkeletonReview?.setSelectedFrames) {
+      window.SkeletonReview.setSelectedFrames(focusFrames);
+    }
     showToast("Phân tích xong");
   } catch (err) {
     showToast(err.message, true);
@@ -361,11 +482,18 @@ frameSelect.addEventListener("change", () => {
   }
 });
 
+clearTerminalBtn.addEventListener("click", () => resetTerminal());
+
 skeletonReviewPanel.addEventListener("skeleton-frame-change", (event) => {
   frameSelect.value = String(event.detail.frameIndex);
   if (activeLayer === "frameAnalysis") {
     renderJsonView();
   }
+});
+
+skeletonReviewPanel.addEventListener("skeleton-reanalyze-selected", (event) => {
+  const frameIndices = event.detail?.frameIndices || [];
+  runAnalysis({ focusFrames: frameIndices });
 });
 
 async function loadAnalyzeMeta() {

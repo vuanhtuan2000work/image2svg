@@ -35,8 +35,8 @@ def _python_openmmlab_supported() -> bool:
     return sys.version_info[:2] in {(3, 10), (3, 11)}
 
 
-def infer_animal_pose(png_bytes: bytes) -> dict[str, Any]:
-    """Run top-down animal pose inference when mmpose is installed."""
+def mmpose_readiness() -> dict[str, Any]:
+    """Cheap readiness check before per-frame MMPose crop/model work."""
     import importlib.util
     import sys
 
@@ -56,6 +56,28 @@ def infer_animal_pose(png_bytes: bytes) -> dict[str, Any]:
             "reason": "mmpose not installed — run ./scripts/install-ml-deps.sh (not pip install -r requirements-ml.txt)",
         }
 
+    config_path = os.environ.get("IMAGE2SVG_MMPOSE_CONFIG")
+    checkpoint_path = os.environ.get("IMAGE2SVG_MMPOSE_CHECKPOINT")
+    if not config_path or not checkpoint_path:
+        return {"status": "skipped", "reason": "mmpose model not configured"}
+
+    missing = [path for path in (config_path, checkpoint_path) if not Path(path).expanduser().is_file()]
+    if missing:
+        return {"status": "skipped", "reason": f"mmpose file not found: {', '.join(missing)}"}
+
+    return {
+        "status": "ready",
+        "device": os.environ.get("IMAGE2SVG_MMPOSE_DEVICE", "cpu"),
+        "config": config_path,
+        "checkpoint": checkpoint_path,
+    }
+
+
+def infer_animal_pose(png_bytes: bytes) -> dict[str, Any]:
+    """Run top-down animal pose inference when mmpose is installed."""
+    readiness = mmpose_readiness()
+    if readiness.get("status") != "ready":
+        return readiness
     model = _get_model()
     if model is None:
         return {"status": "skipped", "reason": "mmpose model not configured"}

@@ -40,6 +40,7 @@ const PART_ZONE_KEYS = [
 
 const DEFAULT_TOGGLES = {
   skeleton: true,
+  posePreview: true,
   landmarks: true,
   mlLandmarks: true,
   gameRect: true,
@@ -147,6 +148,21 @@ function computeFrameScale(frameBBox) {
   return Math.min(FRAME_CARD_MAX_W / frameBBox.w, FRAME_CARD_MAX_H / frameBBox.h, 2.5);
 }
 
+function screenUnit(px, visualScale, min = 1) {
+  return Math.max(min, px / Math.max(visualScale, 0.01));
+}
+
+function pointInsideFrame(point, frame, marginRatio = 0.06) {
+  const frameBBox = frame.bounds.frameBBox;
+  const margin = Math.max(frameBBox.w, frameBBox.h) * marginRatio;
+  return (
+    point.x >= -margin
+    && point.y >= -margin
+    && point.x <= frameBBox.w + margin
+    && point.y <= frameBBox.h + margin
+  );
+}
+
 function renderSkeletonForFrame(svg, frame, options, visualScale = 1) {
   const bones = frame.skeleton?.bones;
   if (!bones || !options.skeleton) return;
@@ -154,8 +170,8 @@ function renderSkeletonForFrame(svg, frame, options, visualScale = 1) {
   const wrapper = nsEl("g", { class: "current-skeleton-layer" });
   svg.appendChild(wrapper);
 
-  const strokeWidth = Math.max(2.5, 3 * visualScale);
-  const jointR = Math.max(4, 3.5 * visualScale);
+  const strokeWidth = screenUnit(3.5, visualScale, 2.5);
+  const jointR = screenUnit(5, visualScale, 3.5);
 
   for (const bone of Object.values(bones)) {
     const root = toOverlayPoint({ ...bone.root, coordinate: bone.root.coordinate || "coreLocal" }, frame);
@@ -189,7 +205,10 @@ function renderSkeletonForFrame(svg, frame, options, visualScale = 1) {
         x: root.x + jointR + 2,
         y: root.y - jointR,
         fill: "#b8ecff",
-        "font-size": Math.max(11, 10 * visualScale),
+        "font-size": screenUnit(12, visualScale, 9),
+        "paint-order": "stroke",
+        stroke: "rgba(8, 11, 16, 0.85)",
+        "stroke-width": screenUnit(3, visualScale, 2),
       });
       label.textContent = `${bone.name} ${Math.round(confidence * 100)}%`;
       wrapper.appendChild(label);
@@ -202,7 +221,7 @@ function renderLandmarkOverlay(svg, frame, options, visualScale = 1) {
   if (!landmarks || !options.landmarks) return;
 
   const group = nsEl("g", { class: "landmark-overlay" });
-  const pointR = Math.max(5, 4 * visualScale);
+  const pointR = screenUnit(5.5, visualScale, 4);
 
   for (const key of LANDMARK_KEYS) {
     const raw = landmarks[key];
@@ -232,7 +251,7 @@ function renderLandmarkOverlay(svg, frame, options, visualScale = 1) {
         r: pointR,
         fill,
         stroke,
-        "stroke-width": Math.max(1.5, visualScale),
+        "stroke-width": screenUnit(1.75, visualScale, 1.25),
         "stroke-dasharray": dash,
         opacity,
       }),
@@ -243,7 +262,10 @@ function renderLandmarkOverlay(svg, frame, options, visualScale = 1) {
         x: point.x + pointR + 2,
         y: point.y + 4,
         fill: "#ffe9a8",
-        "font-size": Math.max(10, 9 * visualScale),
+        "font-size": screenUnit(11, visualScale, 8),
+        "paint-order": "stroke",
+        stroke: "rgba(8, 11, 16, 0.85)",
+        "stroke-width": screenUnit(3, visualScale, 2),
       });
       label.textContent = key;
       group.appendChild(label);
@@ -255,7 +277,7 @@ function renderLandmarkOverlay(svg, frame, options, visualScale = 1) {
 
 function renderBBoxOverlay(svg, frame, options, visualScale = 1) {
   const group = nsEl("g", { class: "bbox-overlay" });
-  const strokeWidth = Math.max(1.5, 1.5 * visualScale);
+  const strokeWidth = screenUnit(2, visualScale, 1.5);
   const specs = [
     { key: "frameBBox", enabled: options.frameBBox, stroke: "#7c9cff", dash: "8 4" },
     { key: "contentBBox", enabled: options.contentBBox, stroke: "#56d4a0", dash: undefined },
@@ -375,7 +397,7 @@ function renderGameRectOverlay(svg, frame, gameManifest, options, visualScale = 
       height: local.h,
       fill: `${color}22`,
       stroke: color,
-      "stroke-width": Math.max(2, 2 * visualScale),
+      "stroke-width": screenUnit(2.5, visualScale, 1.8),
       "stroke-dasharray": "6 4",
     }),
   );
@@ -384,7 +406,10 @@ function renderGameRectOverlay(svg, frame, gameManifest, options, visualScale = 
       x: local.x + 4,
       y: local.y + 14,
       fill: color,
-      "font-size": Math.max(10, 9 * visualScale),
+      "font-size": screenUnit(12, visualScale, 9),
+      "paint-order": "stroke",
+      stroke: "rgba(8, 11, 16, 0.85)",
+      "stroke-width": screenUnit(3, visualScale, 2),
     });
     label.textContent = `Phaser ${Math.round(rect.w)}×${Math.round(rect.h)}`;
     group.appendChild(label);
@@ -397,7 +422,7 @@ function renderMlLandmarkOverlay(svg, frame, options, visualScale = 1) {
   if (!options.mlLandmarks || !ml || ml.status !== "ok") return;
 
   const group = nsEl("g", { class: "ml-landmark-overlay" });
-  const pointR = Math.max(6, 5 * visualScale);
+  const pointR = screenUnit(6, visualScale, 4.5);
 
   for (const kp of ml.keypoints || []) {
     if (kp.x == null || kp.y == null) continue;
@@ -409,7 +434,7 @@ function renderMlLandmarkOverlay(svg, frame, options, visualScale = 1) {
         r: pointR,
         fill: "transparent",
         stroke: "#c792ff",
-        "stroke-width": Math.max(2, 1.5 * visualScale),
+        "stroke-width": screenUnit(2.2, visualScale, 1.5),
         "stroke-dasharray": "4 3",
         opacity: Math.max(0.5, kp.confidence ?? 0.5),
       }),
@@ -419,9 +444,84 @@ function renderMlLandmarkOverlay(svg, frame, options, visualScale = 1) {
         x: point.x + pointR + 2,
         y: point.y + 4,
         fill: "#e2c4ff",
-        "font-size": Math.max(10, 9 * visualScale),
+        "font-size": screenUnit(11, visualScale, 8),
+        "paint-order": "stroke",
+        stroke: "rgba(8, 11, 16, 0.85)",
+        "stroke-width": screenUnit(3, visualScale, 2),
       });
       label.textContent = kp.name || "ml";
+      group.appendChild(label);
+    }
+  }
+
+  svg.appendChild(group);
+}
+
+function renderPosePreviewOverlay(svg, frame, options, visualScale = 1) {
+  if (!options.posePreview || !frame.posePreview?.keypoints?.length) return;
+
+  const keypoints = new Map();
+  for (const kp of frame.posePreview.keypoints) {
+    if (kp.x == null || kp.y == null || !kp.label) continue;
+    const point = toOverlayPoint({ x: kp.x, y: kp.y, coordinate: "globalSvg" }, frame);
+    if (!pointInsideFrame(point, frame)) continue;
+    keypoints.set(kp.label, { ...point, confidence: kp.confidence ?? 0.45, label: kp.label });
+  }
+
+  const group = nsEl("g", { class: "pose-preview-overlay" });
+  const strokeWidth = screenUnit(3, visualScale, 2);
+  const pointR = screenUnit(5, visualScale, 3.5);
+  const frameBBox = frame.bounds.frameBBox;
+  const maxEdgeLength = Math.hypot(frameBBox.w, frameBBox.h) * 0.72;
+
+  for (const edge of frame.posePreview.edges || []) {
+    const a = keypoints.get(edge.from);
+    const b = keypoints.get(edge.to);
+    if (!a || !b) continue;
+    if ((a.confidence ?? 0) < 0.34 || (b.confidence ?? 0) < 0.34) continue;
+    if (Math.hypot(a.x - b.x, a.y - b.y) > maxEdgeLength) continue;
+    group.appendChild(
+      nsEl("line", {
+        x1: a.x,
+        y1: a.y,
+        x2: b.x,
+        y2: b.y,
+        stroke: "#ff80d5",
+        "stroke-width": strokeWidth,
+        "stroke-linecap": "round",
+        opacity: 0.82,
+      }),
+    );
+  }
+
+  for (const kp of frame.posePreview.keypoints) {
+    if (kp.x == null || kp.y == null || !kp.label) continue;
+    const point = keypoints.get(kp.label);
+    if (!point) continue;
+    const confidence = kp.confidence ?? 0.45;
+    const low = confidence < 0.45;
+    group.appendChild(
+      nsEl("circle", {
+        cx: point.x,
+        cy: point.y,
+        r: pointR,
+        fill: low ? "transparent" : "#ff80d5",
+        stroke: "#fff0fb",
+        "stroke-width": screenUnit(1.7, visualScale, 1.2),
+        opacity: low ? 0.62 : 0.95,
+      }),
+    );
+    if (options.confidenceLabels && confidence >= 0.45 && !kp.generated) {
+      const label = nsEl("text", {
+        x: point.x + pointR + screenUnit(3, visualScale, 2),
+        y: point.y + screenUnit(4, visualScale, 3),
+        fill: "#ffd6f4",
+        "font-size": screenUnit(11, visualScale, 8),
+        "paint-order": "stroke",
+        stroke: "rgba(8, 11, 16, 0.88)",
+        "stroke-width": screenUnit(3, visualScale, 2),
+      });
+      label.textContent = kp.displayLabel || kp.label;
       group.appendChild(label);
     }
   }
@@ -434,6 +534,7 @@ function renderFrameOverlays(svg, frame, options, visualScale, gameManifest) {
   renderPartZoneOverlay(svg, frame, options);
   renderBBoxOverlay(svg, frame, options, visualScale);
   renderGameRectOverlay(svg, frame, gameManifest, options, visualScale);
+  renderPosePreviewOverlay(svg, frame, options, visualScale);
   renderSkeletonForFrame(svg, frame, options, visualScale);
   renderLandmarkOverlay(svg, frame, options, visualScale);
   renderMlLandmarkOverlay(svg, frame, options, visualScale);
@@ -710,21 +811,33 @@ function buildFrameCard(
   temporalAnalysis,
   gameManifest,
   isActive,
+  isSelected,
   onSelect,
+  onToggleSelected,
   onReviewChange,
 ) {
   const frameBBox = frame.bounds.frameBBox;
-  const cropBBox = frame.bounds.contentBBox || frameBBox;
+  const cropBBox = frameBBox;
   const scale = computeFrameScale(cropBBox);
   const displayW = cropBBox.w * scale;
   const displayH = cropBBox.h * scale;
 
   const card = document.createElement("article");
-  card.className = `frame-review-card${isActive ? " active" : ""}`;
+  card.className = `frame-review-card${isActive ? " active" : ""}${isSelected ? " selected" : ""}`;
   card.dataset.frame = String(frame.frameIndex);
 
   const header = document.createElement("header");
   header.className = "frame-review-header";
+
+  const selectWrap = document.createElement("label");
+  selectWrap.className = "frame-select";
+  selectWrap.title = "Chọn frame để analyze lại";
+  const selectInput = document.createElement("input");
+  selectInput.type = "checkbox";
+  selectInput.checked = isSelected;
+  selectInput.addEventListener("click", (event) => event.stopPropagation());
+  selectInput.addEventListener("change", () => onToggleSelected(frame.frameIndex, selectInput.checked));
+  selectWrap.append(selectInput);
 
   const title = document.createElement("h3");
   title.textContent = `Frame ${frame.frameIndex}`;
@@ -754,7 +867,7 @@ function buildFrameCard(
   });
   status.addEventListener("click", (event) => event.stopPropagation());
 
-  header.append(title, meta, status);
+  header.append(selectWrap, title, meta, status);
 
   const stageWrap = document.createElement("div");
   stageWrap.className = "frame-review-stage-wrap";
@@ -813,10 +926,15 @@ const SkeletonReview = {
   stripPreviewMeta: null,
   previewBanner: null,
   overlayLegend: null,
+  selectedFrameCountEl: null,
+  selectAllFramesBtn: null,
+  clearSelectedFramesBtn: null,
+  reanalyzeSelectedFramesBtn: null,
 
   svgSource: "",
   analysisResult: null,
   frameIndex: 0,
+  selectedFrames: new Set(),
   toggles: { ...DEFAULT_TOGGLES },
   reviewByFrame: {},
   pendingCorrections: [],
@@ -834,6 +952,10 @@ const SkeletonReview = {
     this.stripPreviewMeta = root.querySelector("#stripPreviewMeta");
     this.previewBanner = root.querySelector("#previewBanner");
     this.overlayLegend = root.querySelector("#overlayLegend");
+    this.selectedFrameCountEl = root.querySelector("#selectedFrameCount");
+    this.selectAllFramesBtn = root.querySelector("#selectAllFramesBtn");
+    this.clearSelectedFramesBtn = root.querySelector("#clearSelectedFramesBtn");
+    this.reanalyzeSelectedFramesBtn = root.querySelector("#reanalyzeSelectedFramesBtn");
 
     root.querySelectorAll("[data-toggle]").forEach((input) => {
       input.addEventListener("change", () => {
@@ -847,6 +969,25 @@ const SkeletonReview = {
       this.reviewByFrame[this.frameIndex] = this.reviewStatusEl.value;
       this.recordReviewStatus(this.frameIndex, this.reviewStatusEl.value, previous);
       this.render();
+    });
+
+    this.selectAllFramesBtn?.addEventListener("click", () => {
+      if (!this.analysisResult?.frameAnalysis) return;
+      this.selectedFrames = new Set(this.analysisResult.frameAnalysis.map((frame) => frame.frameIndex));
+      this.renderTimeline();
+      this.render();
+    });
+
+    this.clearSelectedFramesBtn?.addEventListener("click", () => {
+      this.selectedFrames.clear();
+      this.renderTimeline();
+      this.render();
+    });
+
+    this.reanalyzeSelectedFramesBtn?.addEventListener("click", () => {
+      const frameIndices = [...this.selectedFrames].sort((a, b) => a - b);
+      if (!frameIndices.length) return;
+      this.rootEl?.dispatchEvent(new CustomEvent("skeleton-reanalyze-selected", { detail: { frameIndices } }));
     });
   },
 
@@ -867,6 +1008,12 @@ const SkeletonReview = {
     }
 
     this.renderBanner();
+    this.renderTimeline();
+    this.render();
+  },
+
+  setSelectedFrames(frameIndices = []) {
+    this.selectedFrames = new Set(frameIndices.map(Number).filter((n) => Number.isFinite(n)));
     this.renderTimeline();
     this.render();
   },
@@ -952,7 +1099,7 @@ const SkeletonReview = {
     for (const frame of this.analysisResult.frameAnalysis) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = `frame-chip${frame.frameIndex === this.frameIndex ? " active" : ""}`;
+      btn.className = `frame-chip${frame.frameIndex === this.frameIndex ? " active" : ""}${this.selectedFrames.has(frame.frameIndex) ? " selected" : ""}`;
       btn.dataset.frame = String(frame.frameIndex);
       btn.textContent = `Frame ${frame.frameIndex}`;
       btn.addEventListener("click", () => this.setFrame(frame.frameIndex));
@@ -960,6 +1107,24 @@ const SkeletonReview = {
     }
     if (this.reviewStatusEl) {
       this.reviewStatusEl.value = this.reviewByFrame[this.frameIndex] || "Not Reviewed";
+    }
+    this.updateSelectionToolbar();
+  },
+
+  toggleSelectedFrame(index, selected) {
+    if (selected) this.selectedFrames.add(index);
+    else this.selectedFrames.delete(index);
+    this.renderTimeline();
+    this.render();
+  },
+
+  updateSelectionToolbar() {
+    const count = this.selectedFrames.size;
+    if (this.selectedFrameCountEl) {
+      this.selectedFrameCountEl.textContent = `${count} selected`;
+    }
+    if (this.reanalyzeSelectedFramesBtn) {
+      this.reanalyzeSelectedFramesBtn.disabled = count === 0;
     }
   },
 
@@ -982,7 +1147,9 @@ const SkeletonReview = {
           temporal,
           gameManifest,
           frame.frameIndex === this.frameIndex,
+          this.selectedFrames.has(frame.frameIndex),
           (index) => this.setFrame(index),
+          (index, selected) => this.toggleSelectedFrame(index, selected),
           (index, value) => {
             this.reviewByFrame[index] = value;
             if (index === this.frameIndex && this.reviewStatusEl) {

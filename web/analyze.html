@@ -78,6 +78,17 @@
         </div>
       </section>
 
+      <section class="card analysis-terminal" id="analysisTerminalPanel">
+        <div class="terminal-head">
+          <div>
+            <h2>Terminal</h2>
+            <p class="terminal-summary" id="terminalSummary">idle</p>
+          </div>
+          <button type="button" class="btn small" id="clearTerminalBtn">Clear</button>
+        </div>
+        <div class="terminal-log" id="terminalLog" aria-live="polite"></div>
+      </section>
+
       <section class="card skeleton-review-panel" id="skeletonReviewPanel" hidden>
         <div class="panel-head">
           <div>
@@ -110,6 +121,7 @@
 
         <div class="overlay-legend" id="overlayLegend" hidden>
           <span><i class="swatch skeleton"></i> Skeleton</span>
+          <span><i class="swatch pose"></i> AP-10K pose</span>
           <span><i class="swatch landmark"></i> Landmarks</span>
           <span><i class="swatch ml"></i> ML landmarks</span>
           <span><i class="swatch game"></i> Game rect</span>
@@ -121,6 +133,7 @@
         <div class="overlay-toggles">
           <span class="toggle-group-label">Overlays</span>
           <label class="switch"><input type="checkbox" data-toggle="skeleton" checked /> Skeleton</label>
+          <label class="switch"><input type="checkbox" data-toggle="posePreview" checked /> AP-10K pose</label>
           <label class="switch"><input type="checkbox" data-toggle="landmarks" checked /> Landmarks</label>
           <label class="switch"><input type="checkbox" data-toggle="mlLandmarks" /> ML landmarks</label>
           <label class="switch"><input type="checkbox" data-toggle="gameRect" checked /> Game rect</label>
@@ -128,6 +141,13 @@
           <label class="switch"><input type="checkbox" data-toggle="frameBBox" /> Frame split</label>
           <label class="switch"><input type="checkbox" data-toggle="contentBBox" checked /> Content</label>
           <label class="switch"><input type="checkbox" data-toggle="confidenceLabels" checked /> Labels</label>
+        </div>
+
+        <div class="frame-selection-toolbar">
+          <span id="selectedFrameCount">0 selected</span>
+          <button type="button" class="btn small" id="selectAllFramesBtn">Select all</button>
+          <button type="button" class="btn small" id="clearSelectedFramesBtn">Clear</button>
+          <button type="button" class="btn small primary" id="reanalyzeSelectedFramesBtn" disabled>Analyze selected</button>
         </div>
 
         <p class="frame-grid-hint">Mỗi ô = frame crop (viewBox) + overlay QA trước khi export sang Phaser.</p>

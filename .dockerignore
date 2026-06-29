@@ -1,0 +1,11 @@
+.git
+.DS_Store
+.venv
+.venv-ml
+__pycache__
+*.pyc
+node_modules
+.wrangler
+data
+assets/out
+prompts

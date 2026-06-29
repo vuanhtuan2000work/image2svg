@@ -2,23 +2,18 @@
 
 from __future__ import annotations
 
-import math
 from typing import Literal
 
+from svg_analyze.compiler.frame_fit import candidate_content_clusters, score_candidate
 from svg_analyze.compiler.pass1_raster import (
     _connected_components_2d,
     alpha_projection,
     frame_bboxes_from_top_components,
     infer_pet_strip_frame_count,
     svg_to_mask_bbox,
-    tight_content_bbox_for_frame,
 )
 from svg_analyze.geometry import BBox, union_bbox
-from svg_analyze.legacy_pipeline import (
-    _detect_strip,
-    _score_equal_split,
-    _score_equal_split_vertical,
-)
+from svg_analyze.legacy_pipeline import _detect_strip
 from svg_analyze.legacy_pipeline import parse_svg as legacy_parse_svg
 from svg_analyze.types import FrameSplitCandidate, FrameSplitScoreBreakdown, NormalizedPath, RasterEvidence
 
@@ -50,118 +45,6 @@ def _strip_content_bbox(
     return content
 
 
-def _raster_slot_fit_score(
-    raster: RasterEvidence | None,
-    frame_bboxes: list[BBox],
-    view_box: tuple[float, float, float, float],
-) -> float:
-    if raster is None or not frame_bboxes:
-        return 0.0
-    fits = 0
-    for fb in frame_bboxes:
-        tight = tight_content_bbox_for_frame(raster, fb, view_box, padding_ratio=0.02)
-        if tight is None:
-            continue
-        ratio = tight.w / max(fb.w, 1.0)
-        if 0.35 <= ratio <= 1.15:
-            fits += 1
-    return fits / len(frame_bboxes)
-
-
-def _score_candidate(
-    paths: list[NormalizedPath],
-    content: BBox,
-    frame_bboxes: list[BBox],
-    raster: RasterEvidence | None,
-    direction: Literal["horizontal", "vertical"],
-    view_box: tuple[float, float, float, float],
-) -> FrameSplitScoreBreakdown:
-    if not frame_bboxes:
-        return FrameSplitScoreBreakdown()
-
-    frame_count = len(frame_bboxes)
-    if direction == "horizontal":
-        empty, crossings, neg_overlap = _score_equal_split_legacy(paths, content, frame_count)
-    else:
-        empty, crossings, neg_overlap = _score_equal_split_vertical_legacy(paths, content, frame_count)
-
-    aspects = [b.w / max(b.h, 1.0) for b in frame_bboxes]
-    mean_aspect = sum(aspects) / len(aspects)
-    aspect_var = sum((a - mean_aspect) ** 2 for a in aspects) / len(aspects)
-
-    gap_score = 0.0
-    cut_penalty = crossings / max(1, len(paths))
-    component_containment = 1.0 if empty == 0 else max(0.0, 1.0 - empty / frame_count)
-
-    if raster and raster.alpha_mask is not None and direction == "horizontal":
-        proj = alpha_projection(raster, "x")
-        if proj:
-            smoothed = _smooth(proj)
-            for i in range(1, frame_count):
-                cut_x = int((frame_bboxes[i].x - content.x) / max(content.w, 1) * len(smoothed))
-                cut_x = min(len(smoothed) - 1, max(0, cut_x))
-                valley = smoothed[cut_x] / max(max(smoothed), 1.0)
-                gap_score += 1.0 - valley
-            gap_score /= max(1, frame_count - 1)
-
-    covered = union_bbox(frame_bboxes)
-    coverage = (covered.area / max(content.area, 1.0)) if covered else 0.0
-    slot_fit = _raster_slot_fit_score(raster, frame_bboxes, view_box)
-
-    return FrameSplitScoreBreakdown(
-        gap_score=min(1.0, gap_score),
-        cut_penalty=cut_penalty,
-        component_containment=component_containment,
-        aspect_consistency=max(0.0, 1.0 - aspect_var),
-        path_crossing_penalty=cut_penalty,
-        content_coverage=min(1.0, coverage * 0.6 + slot_fit * 0.4),
-    )
-
-
-def _score_equal_split_legacy(paths, content, frame_count):
-    from svg_analyze.legacy_pipeline import ParsedPath
-
-    legacy_paths = [
-        ParsedPath(
-            path_id=p.id,
-            original_index=p.original_index,
-            d=p.d,
-            d_hash=p.d_hash,
-            fill=p.fill,
-            stroke=p.stroke,
-            opacity=p.opacity,
-            bbox=p.bbox,
-            centroid=p.centroid,
-            has_transform=False,
-            element_id=p.element_id,
-        )
-        for p in paths
-    ]
-    return _score_equal_split(legacy_paths, content, frame_count)
-
-
-def _score_equal_split_vertical_legacy(paths, content, frame_count):
-    from svg_analyze.legacy_pipeline import ParsedPath
-
-    legacy_paths = [
-        ParsedPath(
-            path_id=p.id,
-            original_index=p.original_index,
-            d=p.d,
-            d_hash=p.d_hash,
-            fill=p.fill,
-            stroke=p.stroke,
-            opacity=p.opacity,
-            bbox=p.bbox,
-            centroid=p.centroid,
-            has_transform=False,
-            element_id=p.element_id,
-        )
-        for p in paths
-    ]
-    return _score_equal_split_vertical(legacy_paths, content, frame_count)
-
-
 def _candidate_connected_components(
     paths: list[NormalizedPath],
     content: BBox,
@@ -178,7 +61,7 @@ def _candidate_connected_components(
 
     large.sort(key=lambda c: c[1])
     frame_bboxes = [svg_to_mask_bbox(c, raster, view_box) for c in large]
-    breakdown = _score_candidate(paths, content, frame_bboxes, raster, "horizontal", view_box)
+    breakdown = score_candidate(paths, content, frame_bboxes, raster, "horizontal", view_box)
     return FrameSplitCandidate(
         method="connectedComponents",
         frame_count=len(frame_bboxes),
@@ -242,7 +125,7 @@ def _candidate_alpha_projection(
             frame_bboxes.append(BBox(vx, prev, vw, cut - prev))
             prev = cut
 
-    breakdown = _score_candidate(paths, content, frame_bboxes, raster, direction, view_box)
+    breakdown = score_candidate(paths, content, frame_bboxes, raster, direction, view_box)
     return FrameSplitCandidate(
         method="alphaProjection",
         frame_count=frame_count,
@@ -269,6 +152,35 @@ def _segment_cost(proj: list[float], start: int, end: int) -> float:
     return 0.35 * boundary_alpha + 0.15 * emptiness
 
 
+def _projection_prefix(values: list[float]) -> list[float]:
+    prefix = [0.0]
+    total = 0.0
+    for value in values:
+        total += value
+        prefix.append(total)
+    return prefix
+
+
+def _segment_cost_fast(
+    proj: list[float],
+    prefix: list[float],
+    start: int,
+    end: int,
+    *,
+    max_proj: float,
+    total_mass: float,
+) -> float:
+    if end <= start:
+        return 999.0
+    mass = prefix[end] - prefix[start]
+    if mass <= 0:
+        return 50.0
+    boundary = (proj[start - 1] if start > 0 else 0) + (proj[end] if end < len(proj) else 0)
+    boundary_alpha = boundary / max(max_proj, 1.0)
+    emptiness = 1.0 - (mass / max(total_mass, 1.0)) * (len(proj) / max(end - start, 1))
+    return 0.35 * boundary_alpha + 0.15 * emptiness
+
+
 def _candidate_dynamic_programming(
     paths: list[NormalizedPath],
     content: BBox,
@@ -286,6 +198,9 @@ def _candidate_dynamic_programming(
         return None
 
     max_k = min(max_frames, 12)
+    prefix = _projection_prefix(proj)
+    max_proj = max(proj) if proj else 1.0
+    total_mass = prefix[-1]
     dp: dict[tuple[int, int], float] = {(0, 0): 0.0}
     prev: dict[tuple[int, int], int] = {}
 
@@ -296,7 +211,14 @@ def _candidate_dynamic_programming(
             for j in range(k - 1, i):
                 if (j, k - 1) not in dp:
                     continue
-                cost = dp[(j, k - 1)] + _segment_cost(proj, j, i)
+                cost = dp[(j, k - 1)] + _segment_cost_fast(
+                    proj,
+                    prefix,
+                    j,
+                    i,
+                    max_proj=max_proj,
+                    total_mass=total_mass,
+                )
                 if cost < best:
                     best = cost
                     best_j = j
@@ -338,7 +260,7 @@ def _candidate_dynamic_programming(
             frame_bboxes.append(BBox(vx, prev_y, vw, cut - prev_y))
             prev_y = cut
 
-    breakdown = _score_candidate(paths, content, frame_bboxes, raster, direction, view_box)
+    breakdown = score_candidate(paths, content, frame_bboxes, raster, direction, view_box)
     return FrameSplitCandidate(
         method="dynamicProgramming",
         frame_count=best_k,
@@ -368,7 +290,7 @@ def _candidate_equal_width(
         for i in range(frame_count):
             frame_bboxes.append(BBox(content.x + i * slice_w, content.y, slice_w, content.h))
 
-    breakdown = _score_candidate(
+    breakdown = score_candidate(
         paths,
         content,
         frame_bboxes,
@@ -401,7 +323,7 @@ def _candidate_viewbox_aspect(view_box: tuple[float, float, float, float], paths
 
     slice_w = vw / frame_count
     frame_bboxes = [BBox(vx + i * slice_w, vy, slice_w, vh) for i in range(frame_count)]
-    breakdown = _score_candidate(paths, content, frame_bboxes, None, "horizontal", view_box)
+    breakdown = score_candidate(paths, content, frame_bboxes, None, "horizontal", view_box)
     return FrameSplitCandidate(
         method="viewBoxAspect",
         frame_count=frame_count,
@@ -426,7 +348,7 @@ def _candidate_raster_top_components(
     if not frame_bboxes:
         return None
 
-    breakdown = _score_candidate(paths, content, frame_bboxes, raster, "horizontal", view_box)
+    breakdown = score_candidate(paths, content, frame_bboxes, raster, "horizontal", view_box)
     return FrameSplitCandidate(
         method="rasterComponents",
         frame_count=len(frame_bboxes),
@@ -447,7 +369,7 @@ def _candidate_viewbox_equal(
     vx, vy, vw, vh = view_box
     slice_w = vw / frame_count
     frame_bboxes = [BBox(vx + i * slice_w, vy, slice_w, vh) for i in range(frame_count)]
-    breakdown = _score_candidate(paths, content, frame_bboxes, raster, "horizontal", view_box)
+    breakdown = score_candidate(paths, content, frame_bboxes, raster, "horizontal", view_box)
     return FrameSplitCandidate(
         method="equalWidth",
         frame_count=frame_count,
@@ -469,12 +391,21 @@ def generate_frame_candidates(
     display_height: float | None = None,
 ) -> list[FrameSplitCandidate]:
     content = _strip_content_bbox(paths, view_box)
+    view_aspect = view_box[2] / max(view_box[3], 1.0)
+    content_aspect = content.w / max(content.h, 1.0)
+    horizontal_strip_like = max(view_aspect, content_aspect) >= 1.6
     candidates: list[FrameSplitCandidate] = []
 
     pet_count = infer_pet_strip_frame_count(view_box, raster, display_width)
     if pet_count and pet_count >= 2:
         try:
             cand = _candidate_raster_top_components(paths, content, raster, view_box, pet_count)
+            if cand:
+                candidates.append(cand)
+        except Exception:
+            pass
+        try:
+            cand = candidate_content_clusters(paths, content, raster, view_box, pet_count, "horizontal")
             if cand:
                 candidates.append(cand)
         except Exception:
@@ -507,11 +438,32 @@ def generate_frame_candidates(
                 score_breakdown=FrameSplitScoreBreakdown(),
             )
         )
+        if legacy_count >= 2 and (horizontal_strip_like or legacy_dir == "vertical"):
+            try:
+                cand = candidate_content_clusters(
+                    paths,
+                    content,
+                    raster,
+                    view_box,
+                    legacy_count,
+                    legacy_dir if legacy_dir in {"horizontal", "vertical"} else "horizontal",
+                )
+                if cand:
+                    candidates.append(cand)
+            except Exception:
+                pass
         candidates.append(_candidate_equal_width(paths, content, legacy_count, legacy_dir, view_box, raster))
 
-    aspect = content.w / max(content.h, 1.0)
+    aspect = content_aspect
     max_equal = min(9, int(aspect) + 1)
     for n in range(2, max_equal + 1):
+        if horizontal_strip_like and (not pet_count or abs(n - pet_count) <= 1):
+            try:
+                cand = candidate_content_clusters(paths, content, raster, view_box, n, "horizontal")
+                if cand:
+                    candidates.append(cand)
+            except Exception:
+                pass
         candidates.append(_candidate_equal_width(paths, content, n, "horizontal", view_box, raster))
     if pet_count and pet_count not in range(2, max_equal + 1):
         candidates.append(_candidate_viewbox_equal(view_box, paths, content, pet_count, raster))
@@ -519,15 +471,19 @@ def generate_frame_candidates(
     seen: set[tuple[int, tuple[float, ...]]] = set()
     unique: list[FrameSplitCandidate] = []
     for cand in candidates:
-        key = (cand.frame_count, tuple(round(b.x, 1) for b in cand.frame_bboxes))
+        key = (
+            cand.frame_count,
+            tuple(round(value, 1) for b in cand.frame_bboxes for value in (b.x, b.y, b.w, b.h)),
+        )
         if key in seen:
             continue
         seen.add(key)
         direction = cand.direction if cand.direction in {"horizontal", "vertical"} else "horizontal"
-        cand.score = _score_candidate(paths, content, cand.frame_bboxes, raster, direction, view_box).total
+        cand.score = score_candidate(paths, content, cand.frame_bboxes, raster, direction, view_box).total
         unique.append(cand)
 
-    unique.sort(key=lambda c: (c.score, c.frame_count if c.method == "rasterComponents" else 0), reverse=True)
+    method_priority = {"hybrid": 3, "rasterComponents": 2, "connectedComponents": 1}
+    unique.sort(key=lambda c: (c.score, method_priority.get(c.method, 0), c.frame_count), reverse=True)
     return unique[:16], pet_count
 
 
@@ -556,15 +512,23 @@ def select_frame_split(
             if top_preferred.score >= best.score - 0.035:
                 return top_preferred
 
+    allow_multi_override = best.frame_count >= 2 or bool(preferred_frame_count and preferred_frame_count >= 2)
+
     raster_hits = [c for c in candidates if c.method == "rasterComponents" and c.frame_count >= 2]
-    if raster_hits:
+    if allow_multi_override and raster_hits:
         top_raster = max(raster_hits, key=lambda c: (c.score, c.frame_count))
         if top_raster.score >= best.score - 0.06:
             return top_raster
 
+    content_hits = [c for c in candidates if c.method == "hybrid" and c.frame_count >= 2]
+    if allow_multi_override and content_hits:
+        top_content = max(content_hits, key=lambda c: (c.score, c.frame_count))
+        if top_content.score >= best.score - 0.06:
+            return top_content
+
     tied = [c for c in candidates if c.score >= best.score - 0.015]
     if len(tied) > 1:
-        tied.sort(key=lambda c: (c.score, c.frame_count), reverse=True)
+        tied.sort(key=lambda c: (c.score, 1 if c.method == "hybrid" else 0, c.frame_count), reverse=True)
         return tied[0]
 
     return best

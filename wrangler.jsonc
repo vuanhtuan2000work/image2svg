@@ -1,0 +1,30 @@
+{
+  "name": "image2svg-convert",
+  "main": "cloudflare/worker.js",
+  "compatibility_date": "2026-06-29",
+  "containers": [
+    {
+      "class_name": "Image2SvgContainer",
+      "image": "./Dockerfile",
+      "instance_type": "basic",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "IMAGE2SVG_CONTAINER",
+        "class_name": "Image2SvgContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Image2SvgContainer"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

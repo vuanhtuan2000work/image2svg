@@ -23,7 +23,7 @@
 
       <section class="controls card">
         <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Chọn hoặc kéo thả ảnh">
-          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden />
+          <input type="file" id="fileInput" accept="image/*,.heic,.heif,.tif,.tiff" multiple hidden />
           <div class="dropzone-inner">
             <div class="drop-icon">↑</div>
             <p><strong>Chọn ảnh</strong> hoặc kéo thả vào đây</p>
@@ -44,6 +44,30 @@
             <label for="partSelect">Loại part</label>
             <select id="partSelect">
               <option value="default">default (recipes.yaml)</option>
+            </select>
+          </div>
+
+          <div class="control-row">
+            <label for="svgModeSelect">Kiểu SVG</label>
+            <select id="svgModeSelect">
+              <option value="embedded" selected>Giữ nguyên ảnh/màu</option>
+              <option value="vector">Vector path (vtracer)</option>
+            </select>
+          </div>
+
+          <div class="control-row">
+            <label for="outputTypeSelect">Định dạng output</label>
+            <select id="outputTypeSelect">
+              <option value="svg" selected>svg</option>
+              <option value="png">png</option>
+              <option value="jpg">jpg</option>
+              <option value="jpeg">jpeg</option>
+              <option value="webp">webp</option>
+              <option value="avif">avif</option>
+              <option value="gif">gif</option>
+              <option value="bmp">bmp</option>
+              <option value="tiff">tiff</option>
+              <option value="heic">heic</option>
             </select>
           </div>
 
@@ -81,7 +105,7 @@
 
         <div class="actions">
           <button type="button" class="btn primary" id="convertBtn" disabled>Convert</button>
-          <button type="button" class="btn" id="downloadBtn" disabled>Tải SVG</button>
+          <button type="button" class="btn" id="downloadBtn" disabled>Tải file</button>
           <button type="button" class="btn accent" id="exportAllBtn" disabled>Export tất cả (ZIP)</button>
         </div>
       </section>
@@ -97,8 +121,8 @@
 
         <article class="card preview-panel">
           <div class="panel-head">
-            <h2>SVG output</h2>
-            <button type="button" class="btn small accent" id="exportSvgBtn" disabled>Export SVG</button>
+            <h2>Output</h2>
+            <button type="button" class="btn small accent" id="exportSvgBtn" disabled>Export file</button>
           </div>
           <div class="preview-frame checker" id="svgPreview"></div>
           <p class="stats" id="statsLine"></p>

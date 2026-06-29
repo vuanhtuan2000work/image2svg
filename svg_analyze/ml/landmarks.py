@@ -7,7 +7,15 @@ from typing import Any
 from svg_analyze.geometry import BBox, Point
 from svg_analyze.types import LandmarkCandidate, RasterEvidence
 
-__all__ = ["infer_frame_ml_landmarks", "merge_ml_into_candidates"]
+__all__ = ["get_mmpose_readiness", "infer_frame_ml_landmarks", "merge_ml_into_candidates"]
+
+
+def get_mmpose_readiness() -> dict[str, Any]:
+    try:
+        from svg_analyze.ml.mmpose_backend import mmpose_readiness
+    except ImportError as exc:
+        return {"status": "skipped", "reason": f"mmpose_backend unavailable: {exc}"}
+    return mmpose_readiness()
 
 
 def infer_frame_ml_landmarks(
@@ -17,6 +25,7 @@ def infer_frame_ml_landmarks(
     view_box: tuple[float, float, float, float],
     raster: RasterEvidence | None,
     enable_mmpose: bool,
+    mmpose_readiness: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run optional ML landmark inference on a cropped frame render."""
     if raster is None:
@@ -39,6 +48,11 @@ def infer_frame_ml_landmarks(
 
     if not enable_mmpose:
         result["mmpose"] = {"status": "disabled"}
+        return result
+
+    readiness = mmpose_readiness or get_mmpose_readiness()
+    if readiness.get("status") != "ready":
+        result["mmpose"] = readiness
         return result
 
     rgba = crop_rgba_to_bbox(raster, frame_bbox, view_box)

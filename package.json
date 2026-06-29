@@ -1,0 +1,16 @@
+{
+  "name": "image2svg-convert-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "cf:dev": "wrangler dev",
+    "cf:containers": "wrangler containers list"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.0.29"
+  },
+  "devDependencies": {
+    "wrangler": "^4.102.0"
+  }
+}

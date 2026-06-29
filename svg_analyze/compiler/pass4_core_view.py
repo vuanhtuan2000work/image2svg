@@ -73,9 +73,12 @@ def detect_core_body_region(
             frame_alpha = crop_alpha_to_bbox(raster, content, view_box)
             frame_density = crop_density_to_bbox(raster, content, view_box)
             if frame_alpha is not None and frame_alpha.size > 0:
+                occupancy = float(frame_alpha.mean())
+                if occupancy > 0.92:
+                    raise ValueError("skip_medial_axis_full_background_crop")
                 # Downsample large masks for faster Zhang-Suen
                 fh, fw = frame_alpha.shape
-                step = max(1, max(fh, fw) // 256)
+                step = max(1, max(fh, fw) // 128)
                 if step > 1:
                     frame_alpha = frame_alpha[::step, ::step]
                     frame_density = frame_density[::step, ::step] if frame_density is not None else None

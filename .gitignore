@@ -1,6 +1,8 @@
 .venv/
 .venv-ml/
 __pycache__/
+node_modules/
+.wrangler/
 *.tmp.svg
 .DS_Store
 data/
