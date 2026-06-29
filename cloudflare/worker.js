@@ -205,10 +205,18 @@ async function processImageForOutput(env, file, { smoothing, sharpness, removeBg
   const dimensions = outputDimensionsFor(info, smoothing);
   let bytes = await transformImage(env, file, {
     outputFormat: "png",
-    removeBg,
+    removeBg: false,
     width: dimensions.width,
     sharpness,
   });
+
+  if (removeBg) {
+    bytes = await transformImage(env, new Blob([bytes], { type: "image/png" }), {
+      outputFormat: "png",
+      removeBg: true,
+    });
+  }
+
   let width = dimensions.width;
   let height = dimensions.height;
   let trimApplied = false;
@@ -303,6 +311,7 @@ async function handleConvert(request, env) {
         requested_upscale: processed.requestedUpscale,
         upscale: processed.upscale,
         sharpness,
+        enhanced_before_remove_bg: removeBg && (processed.upscale > 1 || sharpness > 0),
         width: processed.width,
         height: processed.height,
         remove_bg: removeBg,
@@ -336,6 +345,7 @@ async function handleConvert(request, env) {
     requested_upscale: processed.requestedUpscale,
     upscale: processed.upscale,
     sharpness,
+    enhanced_before_remove_bg: removeBg && (processed.upscale > 1 || sharpness > 0),
     width: processed.width,
     height: processed.height,
     remove_bg: removeBg,

@@ -190,18 +190,11 @@ def preprocess_image(
 ) -> tuple[bytes, tuple[int, int]]:
     """Tiền xử lý ảnh trước khi trace. Trả về (png_bytes, (w, h) nội dung).
 
-    Thứ tự: xóa nền -> cắt padding -> upscale (Lanczos) -> sharpen -> blur.
+    Thứ tự: upscale (Lanczos) -> sharpen -> xóa nền -> cắt padding -> blur.
+    Làm nét trước remove background để detector nhận biên vật thể rõ hơn.
     orig_size lấy SAU khi cắt padding nên viewBox SVG ôm sát nội dung.
     """
     img = Image.open(BytesIO(image_bytes)).convert("RGBA")
-
-    if remove_bg:
-        img = remove_background(img, tolerance=bg_tolerance)
-
-    if trim:
-        img = trim_to_content(img)
-
-    orig_size = img.size
 
     if upscale > 1:
         img = img.resize((img.width * upscale, img.height * upscale), Image.LANCZOS)
@@ -212,6 +205,14 @@ def preprocess_image(
         img = img.filter(
             ImageFilter.UnsharpMask(radius=radius, percent=int(sharpen), threshold=2)
         )
+
+    if remove_bg:
+        img = remove_background(img, tolerance=bg_tolerance)
+
+    if trim:
+        img = trim_to_content(img)
+
+    orig_size = img.size
 
     if blur > 0:
         # Bán kính tuyệt đối, nhỏ — chỉ xóa răng cưa còn sót sau upscale, không
@@ -304,6 +305,7 @@ def convert_embedded_svg_bytes(
         "smoothing": smoothing,
         "upscale": int(preset["upscale"]),
         "sharpness": sharpness,
+        "enhanced_before_remove_bg": bool(remove_bg and (int(preset["upscale"]) > 1 or sharpness > 0)),
         "width": img.width,
         "height": img.height,
         "remove_bg": remove_bg,
@@ -346,6 +348,7 @@ def convert_raster_image_bytes(
         "smoothing": smoothing,
         "upscale": int(preset["upscale"]),
         "sharpness": sharpness,
+        "enhanced_before_remove_bg": bool(remove_bg and (int(preset["upscale"]) > 1 or sharpness > 0)),
         "width": img.width,
         "height": img.height,
         "remove_bg": remove_bg,
@@ -550,6 +553,7 @@ def convert_image_bytes(
     report["smoothing"] = smoothing
     report["upscale"] = plan.upscale
     report["sharpness"] = sharpness
+    report["enhanced_before_remove_bg"] = bool(remove_bg and (plan.upscale > 1 or sharpness > 0))
     report["remove_bg"] = remove_bg
     if remove_bg:
         report["remove_bg_engine"] = get_last_background_engine()

@@ -95,6 +95,7 @@ const I18N = {
     "stats.resolution": "resolution",
     "stats.color": "color",
     "stats.sharpness": "sharp",
+    "stats.preEnhance": "pre-enhance",
     "stats.removeBg": "remove-bg",
     "stats.engine": "engine",
     "stats.background": "background",
@@ -160,6 +161,7 @@ const I18N = {
     "stats.resolution": "độ phân giải",
     "stats.color": "màu",
     "stats.sharpness": "nét",
+    "stats.preEnhance": "làm nét trước",
     "stats.removeBg": "xóa-nền",
     "stats.engine": "engine",
     "stats.background": "nền",
@@ -344,6 +346,7 @@ function formatStats(data) {
   if (p.width && p.height) flags.push(`${t("stats.resolution")}:${p.width}×${p.height}`);
   if (p.color_precision) flags.push(`${t("stats.color")}:${p.color_precision}`);
   if (p.sharpness) flags.push(`${t("stats.sharpness")}:${p.sharpness}`);
+  if (p.enhanced_before_remove_bg) flags.push(t("stats.preEnhance"));
   if (p.remove_bg) flags.push(t("stats.removeBg"));
   if (p.remove_bg_engine) flags.push(`${t("stats.engine")}:${p.remove_bg_engine}`);
   if (p.flattened_background) flags.push(`${t("stats.background")}:${p.flattened_background}`);
