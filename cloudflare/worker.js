@@ -12,8 +12,8 @@ const SMOOTHING_PRESETS = {
   high: 4,
 };
 const DEFAULT_SHARPNESS = 80;
-const MAX_OUTPUT_SIDE = 4096;
-const MAX_OUTPUT_PIXELS = 12_000_000;
+const MAX_OUTPUT_SIDE = 2048;
+const MAX_OUTPUT_PIXELS = 4_000_000;
 const NO_ALPHA_OUTPUTS = new Set(["jpg", "jpeg"]);
 
 const MIME_BY_FORMAT = {
@@ -92,10 +92,6 @@ function encodePng(width, height, rgba) {
   return new Uint8Array(UPNG.encode([rgba.buffer], width, height, 0));
 }
 
-function clampByte(value) {
-  return Math.max(0, Math.min(255, Math.round(value)));
-}
-
 function requestedUpscaleFor(smoothing) {
   return SMOOTHING_PRESETS[smoothing] || SMOOTHING_PRESETS.medium;
 }
@@ -109,6 +105,20 @@ function effectiveUpscaleFor(width, height, smoothing) {
   const effective = Math.min(requested, sideLimit, pixelLimit);
   if (effective <= 1) return 1;
   return Math.floor(effective * 100) / 100;
+}
+
+function outputDimensionsFor(info, smoothing) {
+  const upscale = effectiveUpscaleFor(info.width, info.height, smoothing);
+  return {
+    requestedUpscale: requestedUpscaleFor(smoothing),
+    upscale,
+    width: Math.max(1, Math.round(info.width * upscale)),
+    height: Math.max(1, Math.round(info.height * upscale)),
+  };
+}
+
+function sharpenForWorker(sharpness) {
+  return Math.max(0, Math.min(10, sharpness / 25));
 }
 
 function trimDecodedToAlpha(decoded) {
@@ -147,164 +157,16 @@ function trimDecodedToAlpha(decoded) {
   return { width: outWidth, height: outHeight, rgba: out, trimmed: true };
 }
 
-function resizeDecoded(decoded, scale) {
-  if (scale <= 1) return decoded;
-
-  const { width, height, rgba } = decoded;
-  const outWidth = Math.max(1, Math.round(width * scale));
-  const outHeight = Math.max(1, Math.round(height * scale));
-  const out = new Uint8Array(outWidth * outHeight * 4);
-
-  for (let y = 0; y < outHeight; y += 1) {
-    const srcY = Math.max(0, Math.min(height - 1, (y + 0.5) / scale - 0.5));
-    const y0 = Math.floor(srcY);
-    const y1 = Math.min(height - 1, y0 + 1);
-    const wy = srcY - y0;
-
-    for (let x = 0; x < outWidth; x += 1) {
-      const srcX = Math.max(0, Math.min(width - 1, (x + 0.5) / scale - 0.5));
-      const x0 = Math.floor(srcX);
-      const x1 = Math.min(width - 1, x0 + 1);
-      const wx = srcX - x0;
-      const samples = [
-        { index: (y0 * width + x0) * 4, weight: (1 - wx) * (1 - wy) },
-        { index: (y0 * width + x1) * 4, weight: wx * (1 - wy) },
-        { index: (y1 * width + x0) * 4, weight: (1 - wx) * wy },
-        { index: (y1 * width + x1) * 4, weight: wx * wy },
-      ];
-
-      let alpha = 0;
-      let red = 0;
-      let green = 0;
-      let blue = 0;
-      for (const sample of samples) {
-        const a = rgba[sample.index + 3] / 255;
-        const weight = sample.weight;
-        alpha += a * weight;
-        red += rgba[sample.index] * a * weight;
-        green += rgba[sample.index + 1] * a * weight;
-        blue += rgba[sample.index + 2] * a * weight;
-      }
-
-      const dst = (y * outWidth + x) * 4;
-      if (alpha > 0) {
-        out[dst] = clampByte(red / alpha);
-        out[dst + 1] = clampByte(green / alpha);
-        out[dst + 2] = clampByte(blue / alpha);
-      }
-      out[dst + 3] = clampByte(alpha * 255);
-    }
-  }
-
-  return { width: outWidth, height: outHeight, rgba: out };
-}
-
-function sharpenDecoded(decoded, sharpness) {
-  if (sharpness <= 0) return decoded;
-
-  const { width, height, rgba } = decoded;
-  const out = new Uint8Array(rgba);
-  const amount = Math.min(2.2, Math.max(0, sharpness) / 100);
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const dst = (y * width + x) * 4;
-      if (rgba[dst + 3] === 0) {
-        out[dst] = 0;
-        out[dst + 1] = 0;
-        out[dst + 2] = 0;
-        continue;
-      }
-
-      for (let channel = 0; channel < 3; channel += 1) {
-        let sum = 0;
-        let count = 0;
-        for (let dy = -1; dy <= 1; dy += 1) {
-          const yy = Math.max(0, Math.min(height - 1, y + dy));
-          for (let dx = -1; dx <= 1; dx += 1) {
-            const xx = Math.max(0, Math.min(width - 1, x + dx));
-            sum += rgba[(yy * width + xx) * 4 + channel];
-            count += 1;
-          }
-        }
-        const blur = sum / count;
-        const original = rgba[dst + channel];
-        out[dst + channel] = clampByte(original + (original - blur) * amount);
-      }
-    }
-  }
-
-  return { width, height, rgba: out };
-}
-
-function processPngForOutput(pngBytes, { smoothing, sharpness, trim }) {
-  let decoded = decodePng(pngBytes);
-  let trimmed = false;
-  if (trim) {
-    decoded = trimDecodedToAlpha(decoded);
-    trimmed = decoded.trimmed;
-  }
-
-  const requestedUpscale = requestedUpscaleFor(smoothing);
-  const effectiveUpscale = effectiveUpscaleFor(decoded.width, decoded.height, smoothing);
-  decoded = resizeDecoded(decoded, effectiveUpscale);
-  decoded = sharpenDecoded(decoded, sharpness);
-
-  return {
-    bytes: encodePng(decoded.width, decoded.height, decoded.rgba),
-    width: decoded.width,
-    height: decoded.height,
-    requestedUpscale,
-    upscale: effectiveUpscale,
-    trimApplied: trimmed,
-  };
-}
-
-function trimPngToAlpha(pngBytes) {
-  const { width, height, rgba } = decodePng(pngBytes);
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
-
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const alpha = rgba[(y * width + x) * 4 + 3];
-      if (alpha > 0) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
-    }
-  }
-
-  if (maxX < minX || maxY < minY) {
-    return { bytes: pngBytes, width, height, trimmed: false };
-  }
-
-  if (minX === 0 && minY === 0 && maxX === width - 1 && maxY === height - 1) {
-    return { bytes: pngBytes, width, height, trimmed: false };
-  }
-
-  const outWidth = maxX - minX + 1;
-  const outHeight = maxY - minY + 1;
-  const out = new Uint8Array(outWidth * outHeight * 4);
-  for (let y = 0; y < outHeight; y += 1) {
-    const srcStart = ((minY + y) * width + minX) * 4;
-    const dstStart = y * outWidth * 4;
-    out.set(rgba.subarray(srcStart, srcStart + outWidth * 4), dstStart);
-  }
-
-  return {
-    bytes: encodePng(outWidth, outHeight, out),
-    width: outWidth,
-    height: outHeight,
-    trimmed: true,
-  };
-}
-
-async function transformImage(env, source, { outputFormat, removeBg = false }) {
+async function transformImage(
+  env,
+  source,
+  {
+    outputFormat,
+    removeBg = false,
+    width = null,
+    sharpness = 0,
+  },
+) {
   const imageFormat = IMAGE_OUTPUT_BY_FORMAT[outputFormat];
   if (!imageFormat) {
     throw new Error(`Định dạng output không hỗ trợ trên Cloudflare: ${outputFormat}`);
@@ -313,6 +175,17 @@ async function transformImage(env, source, { outputFormat, removeBg = false }) {
   let pipeline = env.IMAGES.input(source.stream());
   if (removeBg) {
     pipeline = pipeline.transform({ segment: "foreground" });
+  }
+  if (width || sharpness > 0) {
+    const options = {};
+    if (width) {
+      options.width = width;
+      options.upscale = "interpolate";
+    }
+    if (sharpness > 0) {
+      options.sharpen = sharpenForWorker(sharpness);
+    }
+    pipeline = pipeline.transform(options);
   }
 
   const outputOptions = { format: imageFormat };
@@ -325,6 +198,37 @@ async function transformImage(env, source, { outputFormat, removeBg = false }) {
     throw new Error(`Cloudflare Images xử lý thất bại (${response.status})`);
   }
   return new Uint8Array(await response.arrayBuffer());
+}
+
+async function processImageForOutput(env, file, { smoothing, sharpness, removeBg, trim }) {
+  const info = await env.IMAGES.info(file.stream());
+  const dimensions = outputDimensionsFor(info, smoothing);
+  let bytes = await transformImage(env, file, {
+    outputFormat: "png",
+    removeBg,
+    width: dimensions.width,
+    sharpness,
+  });
+  let width = dimensions.width;
+  let height = dimensions.height;
+  let trimApplied = false;
+
+  if (trim) {
+    const decoded = trimDecodedToAlpha(decodePng(bytes));
+    trimApplied = decoded.trimmed;
+    width = decoded.width;
+    height = decoded.height;
+    bytes = encodePng(width, height, decoded.rgba);
+  }
+
+  return {
+    bytes,
+    width,
+    height,
+    requestedUpscale: dimensions.requestedUpscale,
+    upscale: dimensions.upscale,
+    trimApplied,
+  };
 }
 
 function svgEmbedPng(pngBytes, width, height) {
@@ -384,8 +288,7 @@ async function handleConvert(request, env) {
   }
 
   if (outputType === "svg") {
-    const normalizedPng = await transformImage(env, file, { outputFormat: "png", removeBg });
-    const processed = processPngForOutput(normalizedPng, { smoothing, sharpness, trim });
+    const processed = await processImageForOutput(env, file, { smoothing, sharpness, removeBg, trim });
 
     const svg = svgEmbedPng(processed.bytes, processed.width, processed.height);
     return json({
@@ -414,8 +317,7 @@ async function handleConvert(request, env) {
   }
 
   const outputFormat = outputType === "jpg" ? "jpg" : outputType;
-  const normalizedPng = await transformImage(env, file, { outputFormat: "png", removeBg });
-  const processed = processPngForOutput(normalizedPng, { smoothing, sharpness, trim });
+  const processed = await processImageForOutput(env, file, { smoothing, sharpness, removeBg, trim });
   let bytes;
   if (outputFormat === "png") {
     bytes = processed.bytes;
