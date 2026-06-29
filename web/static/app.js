@@ -77,6 +77,40 @@ function isVectorSvgMode() {
   return isSvgOutput() && svgModeSelect.value === "vector";
 }
 
+function applyOptionAvailability(select, allowedValues = [], disabledValues = []) {
+  const allowed = new Set(allowedValues);
+  const disabled = new Set(disabledValues);
+  let firstEnabled = null;
+
+  for (const option of select.options) {
+    const isAllowed = allowed.size === 0 || allowed.has(option.value);
+    const isDisabled = !isAllowed || disabled.has(option.value);
+    option.disabled = isDisabled;
+    option.hidden = false;
+    if (isDisabled) {
+      option.textContent = option.textContent.replace(/\s+\(Cloudflare: tắt\)$/, "");
+      option.textContent = `${option.textContent} (Cloudflare: tắt)`;
+    } else {
+      option.textContent = option.textContent.replace(/\s+\(Cloudflare: tắt\)$/, "");
+      if (!firstEnabled) firstEnabled = option.value;
+    }
+  }
+
+  if (select.selectedOptions[0]?.disabled && firstEnabled) {
+    select.value = firstEnabled;
+  }
+}
+
+function applyRuntimeMeta(data) {
+  if (Array.isArray(data.outputTypes)) {
+    applyOptionAvailability(outputTypeSelect, data.outputTypes, data.disabledOutputTypes || []);
+  }
+  if (Array.isArray(data.svgModes)) {
+    applyOptionAvailability(svgModeSelect, data.svgModes, []);
+  }
+  updateFormatControls();
+}
+
 function updateFormatControls() {
   const svgMode = isSvgOutput();
   const vectorMode = isVectorSvgMode();
@@ -295,7 +329,11 @@ function addFiles(files) {
 async function loadMeta() {
   const res = await fetch("/api/meta");
   const data = await res.json();
-  optimizerBadge.textContent = `optimizer: ${data.optimizer}`;
+  optimizerBadge.textContent = data.cloudflare?.mode
+    ? `optimizer: ${data.optimizer} · ${data.cloudflare.mode}`
+    : `optimizer: ${data.optimizer}`;
+
+  applyRuntimeMeta(data);
 
   for (const part of data.parts) {
     const opt = document.createElement("option");

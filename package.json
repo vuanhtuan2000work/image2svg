@@ -4,11 +4,11 @@
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
-    "cf:dev": "wrangler dev",
-    "cf:containers": "wrangler containers list"
+    "cf:dev": "wrangler dev"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.0.29"
+    "fflate": "^0.8.3",
+    "upng-js": "^2.1.0"
   },
   "devDependencies": {
     "wrangler": "^4.102.0"
