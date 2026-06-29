@@ -265,6 +265,8 @@ async def convert(
             try:
                 svg, params, optimizer, elapsed = convert_embedded_svg_bytes(
                     image_bytes,
+                    smoothing=smoothing,
+                    sharpness=max(0, min(250, sharpness)),
                     remove_bg=remove_bg,
                     trim=trim,
                 )
@@ -313,6 +315,10 @@ async def convert(
         payload, params, mime, extension, elapsed = convert_raster_image_bytes(
             image_bytes,
             output_type=output_type,
+            smoothing=smoothing,
+            sharpness=max(0, min(250, sharpness)),
+            remove_bg=remove_bg,
+            trim=trim,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

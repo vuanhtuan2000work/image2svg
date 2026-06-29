@@ -277,24 +277,31 @@ def _svg_embed_image(png_bytes: bytes, width: int, height: int) -> str:
 def convert_embedded_svg_bytes(
     image_bytes: bytes,
     *,
+    smoothing: str = DEFAULT_SMOOTHING,
+    sharpness: int = 0,
     remove_bg: bool = False,
     trim: bool = False,
 ) -> tuple[str, dict, str, float]:
     """Wrap the image in SVG without vector tracing, preserving raster colors."""
     t0 = time.time()
-    img = Image.open(BytesIO(image_bytes)).convert("RGBA")
-
-    if remove_bg:
-        img = remove_background(img)
-
-    if trim:
-        img = trim_to_content(img)
+    preset = SMOOTHING_PRESETS.get(smoothing, SMOOTHING_PRESETS[DEFAULT_SMOOTHING])
+    png_bytes, _orig_size = preprocess_image(
+        image_bytes,
+        upscale=int(preset["upscale"]),
+        blur=float(preset["blur"]),
+        sharpen=max(0, min(250, int(sharpness))),
+        remove_bg=remove_bg,
+        trim=trim,
+    )
+    img = Image.open(BytesIO(png_bytes)).convert("RGBA")
 
     png_bytes = _png_bytes_for_svg_embed(img)
     svg = _svg_embed_image(png_bytes, img.width, img.height)
     report = {
         "svg_mode": "embedded",
         "source": "embedded-raster",
+        "smoothing": smoothing,
+        "sharpness": sharpness,
         "remove_bg": remove_bg,
         "trim": trim,
     }
@@ -307,19 +314,38 @@ def convert_raster_image_bytes(
     image_bytes: bytes,
     *,
     output_type: str,
+    smoothing: str = "none",
+    sharpness: int = 0,
+    remove_bg: bool = False,
+    trim: bool = False,
 ) -> tuple[bytes, dict, str, str, float]:
-    """Transcode original image bytes to a raster format without SVG preprocessing."""
+    """Transcode image bytes to a raster format with optional image preprocessing."""
     output_type = output_type.lower()
     if output_type not in RASTER_OUTPUT_FORMATS:
         raise ValueError(f"Định dạng output không hỗ trợ: {output_type}")
 
     t0 = time.time()
-    img = Image.open(BytesIO(image_bytes)).convert("RGBA")
+    preset = SMOOTHING_PRESETS.get(smoothing, SMOOTHING_PRESETS["none"])
+    png_bytes, _orig_size = preprocess_image(
+        image_bytes,
+        upscale=int(preset["upscale"]),
+        blur=float(preset["blur"]),
+        sharpen=max(0, min(250, int(sharpness))),
+        remove_bg=remove_bg,
+        trim=trim,
+    )
+    img = Image.open(BytesIO(png_bytes)).convert("RGBA")
     payload = _save_raster_image(img, output_type)
     report = {
         "format": output_type,
-        "source": "original-image",
+        "source": "raster-image",
+        "smoothing": smoothing,
+        "sharpness": sharpness,
+        "remove_bg": remove_bg,
+        "trim": trim,
     }
+    if remove_bg:
+        report["remove_bg_engine"] = get_last_background_engine()
     if output_type in NO_ALPHA_OUTPUTS and img.mode == "RGBA":
         report["flattened_background"] = "white"
     return payload, report, RASTER_MIME_TYPES[output_type], output_type, time.time() - t0

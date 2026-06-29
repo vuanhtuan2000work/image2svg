@@ -4,6 +4,7 @@ import * as UPNG from "upng-js";
 const OUTPUT_FORMATS = ["jpg", "jpeg", "png", "webp", "avif", "svg"];
 const DISABLED_OUTPUT_FORMATS = ["gif", "bmp", "tiff", "heic"];
 const SVG_MODES = ["embedded"];
+const SMOOTHING_LEVELS = ["none", "low", "medium", "high"];
 const NO_ALPHA_OUTPUTS = new Set(["jpg", "jpeg"]);
 
 const MIME_BY_FORMAT = {
@@ -126,15 +127,18 @@ function trimPngToAlpha(pngBytes) {
   };
 }
 
-async function transformImage(env, file, { outputFormat, removeBg = false }) {
+async function transformImage(env, source, { outputFormat, removeBg = false, sharpness = 0 }) {
   const imageFormat = IMAGE_OUTPUT_BY_FORMAT[outputFormat];
   if (!imageFormat) {
     throw new Error(`Định dạng output không hỗ trợ trên Cloudflare: ${outputFormat}`);
   }
 
-  let pipeline = env.IMAGES.input(file.stream());
+  let pipeline = env.IMAGES.input(source.stream());
   if (removeBg) {
     pipeline = pipeline.transform({ segment: "foreground" });
+  }
+  if (sharpness > 0) {
+    pipeline = pipeline.transform({ sharpen: Math.max(0, Math.min(10, sharpness / 25)) });
   }
 
   const outputOptions = { format: imageFormat };
@@ -166,8 +170,8 @@ async function handleMeta() {
     disabledOutputTypes: DISABLED_OUTPUT_FORMATS,
     svgModes: SVG_MODES,
     defaultRecipe: {},
-    smoothingLevels: ["none"],
-    defaultSmoothing: "none",
+    smoothingLevels: SMOOTHING_LEVELS,
+    defaultSmoothing: "medium",
     cloudflare: {
       mode: "worker-native",
       vectorSvg: false,
@@ -194,14 +198,16 @@ async function handleConvert(request, env) {
   }
 
   const svgMode = String(form.get("svg_mode") || "embedded");
+  const smoothing = String(form.get("smoothing") || "medium");
+  const sharpness = Math.max(0, Math.min(250, Number(form.get("sharpness") || 0)));
+  const removeBg = String(form.get("remove_bg") || "false") === "true";
+  const trim = String(form.get("trim") || "false") === "true";
   if (outputType === "svg" && svgMode !== "embedded") {
     return error(400, "Cloudflare mode chỉ hỗ trợ SVG embedded; vector/vtracer là local-only.");
   }
 
   if (outputType === "svg") {
-    const removeBg = String(form.get("remove_bg") || "false") === "true";
-    const trim = String(form.get("trim") || "false") === "true";
-    let pngBytes = await transformImage(env, file, { outputFormat: "png", removeBg });
+    let pngBytes = await transformImage(env, file, { outputFormat: "png", removeBg, sharpness });
     let { width, height } = decodePng(pngBytes);
     let trimmed = false;
     if (trim) {
@@ -221,6 +227,8 @@ async function handleConvert(request, env) {
       params: {
         svg_mode: "embedded",
         source: "cloudflare-images",
+        smoothing,
+        sharpness,
         remove_bg: removeBg,
         remove_bg_engine: removeBg ? "cloudflare-images:segment=foreground" : undefined,
         trim,
@@ -233,13 +241,38 @@ async function handleConvert(request, env) {
   }
 
   const outputFormat = outputType === "jpg" ? "jpg" : outputType;
-  const bytes = await transformImage(env, file, { outputFormat });
+  let bytes;
+  let trimApplied = false;
+  if (trim) {
+    const pngBytes = await transformImage(env, file, { outputFormat: "png", removeBg, sharpness });
+    const result = trimPngToAlpha(pngBytes);
+    trimApplied = result.trimmed;
+    if (outputFormat === "png") {
+      bytes = result.bytes;
+    } else {
+      bytes = await transformImage(env, new Blob([result.bytes], { type: "image/png" }), {
+        outputFormat,
+        removeBg: false,
+        sharpness: 0,
+      });
+    }
+  } else {
+    bytes = await transformImage(env, file, { outputFormat, removeBg, sharpness });
+  }
   const dataBase64 = bytesToBase64(bytes);
   const mime = MIME_BY_FORMAT[outputType];
   const params = {
     format: outputType,
     source: "cloudflare-images",
+    smoothing,
+    sharpness,
+    remove_bg: removeBg,
+    trim,
+    trim_applied: trimApplied,
   };
+  if (removeBg) {
+    params.remove_bg_engine = "cloudflare-images:segment=foreground";
+  }
   if (NO_ALPHA_OUTPUTS.has(outputType)) {
     params.flattened_background = "cloudflare-default";
   }

@@ -7,6 +7,7 @@ const clearFilesBtn = document.getElementById("clearFilesBtn");
 const partSelect = document.getElementById("partSelect");
 const svgModeSelect = document.getElementById("svgModeSelect");
 const outputTypeSelect = document.getElementById("outputTypeSelect");
+const languageSelect = document.getElementById("languageSelect");
 const smoothingSelect = document.getElementById("smoothingSelect");
 const colorRange = document.getElementById("colorRange");
 const colorVal = document.getElementById("colorVal");
@@ -30,6 +31,170 @@ const toast = document.getElementById("toast");
 let fileEntries = [];
 let activeEntryId = null;
 let converting = false;
+let runtimeMeta = null;
+let currentLang = localStorage.getItem("image2svg.lang") || "en";
+
+const I18N = {
+  en: {
+    "nav.convert": "Convert",
+    "nav.analyze": "Analyze",
+    "hero.eyebrow": "Local · offline",
+    "hero.subtitle": "Convert images, remove backgrounds, preview instantly, export clean files",
+    "language.label": "Language",
+    "dropzone.aria": "Choose or drop images",
+    "dropzone.choose": "Choose images",
+    "dropzone.drop": "or drop them here",
+    "dropzone.hint": "PNG, JPG, WebP, HEIC, TIFF · multiple files supported",
+    "files.selected": "Selected images",
+    "actions.clear": "Clear all",
+    "actions.download": "Download file",
+    "actions.exportAll": "Export all (ZIP)",
+    "actions.exportAllCount": "Export all ({count}) ZIP",
+    "actions.exportFile": "Export file",
+    "actions.convert": "Convert",
+    "actions.convertCount": "Convert ({count})",
+    "actions.converting": "Converting…",
+    "actions.convertingStep": "Converting {current}/{total}…",
+    "actions.downloadFormat": "Download {format}",
+    "actions.exportFormat": "Export {format}",
+    "actions.exportingZip": "Creating ZIP…",
+    "controls.part": "Part type",
+    "controls.svgMode": "SVG mode",
+    "controls.output": "Output format",
+    "controls.smoothing": "Edge smoothing",
+    "controls.color": "Color precision",
+    "controls.sharpness": "Sharpness",
+    "options.svgEmbedded": "Preserve image/colors",
+    "options.svgVector": "Vector path (vtracer)",
+    "options.smoothingNone": "none — direct conversion (fast)",
+    "options.smoothingLow": "low — upscale 2x",
+    "options.smoothingMedium": "medium — upscale 3x (recommended)",
+    "options.smoothingHigh": "high — upscale 4x (smoothest, slower)",
+    "options.disabledSuffix": "(Cloudflare: disabled)",
+    "values.auto": "auto",
+    "toggles.removeBg": "Remove background (transparent)",
+    "toggles.trim": "Trim padding (fit content)",
+    "preview.source": "Source image",
+    "status.pending": "Queued",
+    "status.converting": "Converting…",
+    "status.done": "Done",
+    "status.error": "Error",
+    "toast.duplicate": "Image is already in the list",
+    "toast.added": "Added {count} image(s)",
+    "toast.convertDone": "Converted {count} image(s)",
+    "toast.convertFailed": "Conversion failed for {count} image(s)",
+    "toast.convertMixed": "Done {done} image(s) · failed {failed}",
+    "toast.exported": "Exported {filename}",
+    "toast.exportedZip": "Exported {count} files into ZIP",
+    "errors.convertFailed": "Conversion failed",
+    "errors.zipFailed": "ZIP export failed",
+    "preview.unsupported": "{format} preview is not supported. You can still download the file.",
+    "preview.notConverted": "Not converted yet.",
+    "stats.type": "type",
+    "stats.svg": "svg",
+    "stats.smoothing": "smooth",
+    "stats.color": "color",
+    "stats.sharpness": "sharp",
+    "stats.removeBg": "remove-bg",
+    "stats.engine": "engine",
+    "stats.background": "background",
+    "stats.trim": "trim",
+  },
+  vi: {
+    "nav.convert": "Convert",
+    "nav.analyze": "Analyze",
+    "hero.eyebrow": "Local · offline",
+    "hero.subtitle": "Chuyển đổi ảnh, xóa nền, preview ngay, export file sạch",
+    "language.label": "Ngôn ngữ",
+    "dropzone.aria": "Chọn hoặc kéo thả ảnh",
+    "dropzone.choose": "Chọn ảnh",
+    "dropzone.drop": "hoặc kéo thả vào đây",
+    "dropzone.hint": "PNG, JPG, WebP, HEIC, TIFF · chọn nhiều ảnh cùng lúc",
+    "files.selected": "Ảnh đã chọn",
+    "actions.clear": "Xóa tất cả",
+    "actions.download": "Tải file",
+    "actions.exportAll": "Export tất cả (ZIP)",
+    "actions.exportAllCount": "Export tất cả ({count}) ZIP",
+    "actions.exportFile": "Export file",
+    "actions.convert": "Convert",
+    "actions.convertCount": "Convert ({count})",
+    "actions.converting": "Đang convert…",
+    "actions.convertingStep": "Đang convert {current}/{total}…",
+    "actions.downloadFormat": "Tải {format}",
+    "actions.exportFormat": "Export {format}",
+    "actions.exportingZip": "Đang tạo ZIP…",
+    "controls.part": "Loại part",
+    "controls.svgMode": "Kiểu SVG",
+    "controls.output": "Định dạng output",
+    "controls.smoothing": "Độ mịn rìa",
+    "controls.color": "Màu sắc chuẩn xác",
+    "controls.sharpness": "Độ rõ nét",
+    "options.svgEmbedded": "Giữ nguyên ảnh/màu",
+    "options.svgVector": "Vector path (vtracer)",
+    "options.smoothingNone": "none — convert thẳng (nhanh)",
+    "options.smoothingLow": "low — upscale 2x",
+    "options.smoothingMedium": "medium — upscale 3x (khuyên dùng)",
+    "options.smoothingHigh": "high — upscale 4x (mịn nhất, chậm)",
+    "options.disabledSuffix": "(Cloudflare: tắt)",
+    "values.auto": "tự động",
+    "toggles.removeBg": "Xóa nền (trong suốt)",
+    "toggles.trim": "Cắt padding (ôm sát nội dung)",
+    "preview.source": "Ảnh gốc",
+    "status.pending": "Chờ",
+    "status.converting": "Đang convert…",
+    "status.done": "Xong",
+    "status.error": "Lỗi",
+    "toast.duplicate": "Ảnh đã có trong danh sách",
+    "toast.added": "Đã thêm {count} ảnh",
+    "toast.convertDone": "Convert xong {count} ảnh",
+    "toast.convertFailed": "Convert thất bại {count} ảnh",
+    "toast.convertMixed": "Xong {done} ảnh · lỗi {failed}",
+    "toast.exported": "Đã export {filename}",
+    "toast.exportedZip": "Đã export {count} file vào ZIP",
+    "errors.convertFailed": "Convert thất bại",
+    "errors.zipFailed": "Export ZIP thất bại",
+    "preview.unsupported": "Preview không hỗ trợ {format}. Vẫn có thể tải file.",
+    "preview.notConverted": "Chưa convert.",
+    "stats.type": "type",
+    "stats.svg": "svg",
+    "stats.smoothing": "mịn",
+    "stats.color": "màu",
+    "stats.sharpness": "nét",
+    "stats.removeBg": "xóa-nền",
+    "stats.engine": "engine",
+    "stats.background": "nền",
+    "stats.trim": "trim",
+  },
+};
+
+function t(key, vars = {}) {
+  const template = I18N[currentLang]?.[key] || I18N.en[key] || key;
+  return template.replace(/\{(\w+)\}/g, (_match, name) => vars[name] ?? "");
+}
+
+function applyTranslations() {
+  document.documentElement.lang = currentLang;
+  for (const node of document.querySelectorAll("[data-i18n]")) {
+    node.textContent = t(node.dataset.i18n);
+  }
+  for (const node of document.querySelectorAll("[data-i18n-aria-label]")) {
+    node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel));
+  }
+  for (const node of document.querySelectorAll("[data-i18n-alt]")) {
+    node.setAttribute("alt", t(node.dataset.i18nAlt));
+  }
+  colorRange.dispatchEvent(new Event("input"));
+  if (runtimeMeta) applyRuntimeMeta(runtimeMeta);
+  renderFileList();
+  updateActionButtons();
+}
+
+function setLanguage(lang) {
+  currentLang = I18N[lang] ? lang : "en";
+  localStorage.setItem("image2svg.lang", currentLang);
+  languageSelect.value = currentLang;
+  applyTranslations();
+}
 
 function showToast(message, isError = false) {
   toast.textContent = message;
@@ -85,15 +250,12 @@ function applyOptionAvailability(select, allowedValues = [], disabledValues = []
   for (const option of select.options) {
     const isAllowed = allowed.size === 0 || allowed.has(option.value);
     const isDisabled = !isAllowed || disabled.has(option.value);
+    const baseText = option.dataset.i18n ? t(option.dataset.i18n) : (option.dataset.baseText || option.textContent);
+    option.dataset.baseText = baseText;
     option.disabled = isDisabled;
     option.hidden = false;
-    if (isDisabled) {
-      option.textContent = option.textContent.replace(/\s+\(Cloudflare: tắt\)$/, "");
-      option.textContent = `${option.textContent} (Cloudflare: tắt)`;
-    } else {
-      option.textContent = option.textContent.replace(/\s+\(Cloudflare: tắt\)$/, "");
-      if (!firstEnabled) firstEnabled = option.value;
-    }
+    option.textContent = isDisabled ? `${baseText} ${t("options.disabledSuffix")}` : baseText;
+    if (!isDisabled && !firstEnabled) firstEnabled = option.value;
   }
 
   if (select.selectedOptions[0]?.disabled && firstEnabled) {
@@ -102,6 +264,7 @@ function applyOptionAvailability(select, allowedValues = [], disabledValues = []
 }
 
 function applyRuntimeMeta(data) {
+  runtimeMeta = data;
   if (Array.isArray(data.outputTypes)) {
     applyOptionAvailability(outputTypeSelect, data.outputTypes, data.disabledOutputTypes || []);
   }
@@ -115,12 +278,13 @@ function updateFormatControls() {
   const svgMode = isSvgOutput();
   const vectorMode = isVectorSvgMode();
   svgModeSelect.disabled = !svgMode;
-  for (const control of [partSelect, smoothingSelect, colorRange, sharpRange]) {
+  for (const control of [partSelect, colorRange]) {
     control.disabled = !vectorMode;
   }
-  for (const control of [removeBg, trimPad]) {
-    control.disabled = !svgMode;
-  }
+  smoothingSelect.disabled = false;
+  sharpRange.disabled = false;
+  removeBg.disabled = false;
+  trimPad.disabled = false;
 }
 
 function updateActionButtons() {
@@ -133,43 +297,47 @@ function updateActionButtons() {
   downloadBtn.disabled = !active?.result;
   exportSvgBtn.disabled = !active?.result;
   const activeFormat = active?.result?.format || outputTypeSelect.value;
-  downloadBtn.textContent = active?.result ? `Tải ${activeFormat.toUpperCase()}` : "Tải file";
-  exportSvgBtn.textContent = active?.result ? `Export ${activeFormat.toUpperCase()}` : "Export file";
+  downloadBtn.textContent = active?.result
+    ? t("actions.downloadFormat", { format: activeFormat.toUpperCase() })
+    : t("actions.download");
+  exportSvgBtn.textContent = active?.result
+    ? t("actions.exportFormat", { format: activeFormat.toUpperCase() })
+    : t("actions.exportFile");
   exportAllBtn.disabled = doneCount === 0;
   exportAllBtn.textContent =
-    doneCount > 1 ? `Export tất cả (${doneCount}) ZIP` : "Export tất cả (ZIP)";
+    doneCount > 1 ? t("actions.exportAllCount", { count: doneCount }) : t("actions.exportAll");
   if (!converting) {
     convertBtn.textContent =
-      fileEntries.length > 1 ? `Convert (${fileEntries.length})` : "Convert";
+      fileEntries.length > 1 ? t("actions.convertCount", { count: fileEntries.length }) : t("actions.convert");
   }
 }
 
 function formatStats(data) {
   const p = data.params || {};
   const flags = [];
-  if (data.format) flags.push(`type:${data.format}`);
-  if (p.svg_mode) flags.push(`svg:${p.svg_mode}`);
+  if (data.format) flags.push(`${t("stats.type")}:${data.format}`);
+  if (p.svg_mode) flags.push(`${t("stats.svg")}:${p.svg_mode}`);
   if (p.source) flags.push(p.source);
-  if (p.smoothing) flags.push(`mịn:${p.smoothing}`);
-  if (p.color_precision) flags.push(`màu:${p.color_precision}`);
-  if (p.sharpness) flags.push(`nét:${p.sharpness}`);
-  if (p.remove_bg) flags.push("xóa-nền");
-  if (p.remove_bg_engine) flags.push(`engine:${p.remove_bg_engine}`);
-  if (p.flattened_background) flags.push(`nền:${p.flattened_background}`);
-  if (p.trim) flags.push("trim");
+  if (p.smoothing) flags.push(`${t("stats.smoothing")}:${p.smoothing}`);
+  if (p.color_precision) flags.push(`${t("stats.color")}:${p.color_precision}`);
+  if (p.sharpness) flags.push(`${t("stats.sharpness")}:${p.sharpness}`);
+  if (p.remove_bg) flags.push(t("stats.removeBg"));
+  if (p.remove_bg_engine) flags.push(`${t("stats.engine")}:${p.remove_bg_engine}`);
+  if (p.flattened_background) flags.push(`${t("stats.background")}:${p.flattened_background}`);
+  if (p.trim) flags.push(t("stats.trim"));
   return `${data.filename} · ${(data.sizeBytes / 1024).toFixed(1)} KB · ${data.elapsed}s · ${data.optimizer} · ${flags.join(" · ")}`;
 }
 
 function statusLabel(status) {
   switch (status) {
     case "pending":
-      return "Chờ";
+      return t("status.pending");
     case "converting":
-      return "Đang convert…";
+      return t("status.converting");
     case "done":
-      return "Xong";
+      return t("status.done");
     case "error":
-      return "Lỗi";
+      return t("status.error");
     default:
       return status;
   }
@@ -208,7 +376,7 @@ function renderFileList() {
     removeBtn.type = "button";
     removeBtn.className = "btn small file-remove";
     removeBtn.textContent = "×";
-    removeBtn.title = "Xóa ảnh";
+    removeBtn.title = t("actions.clear");
     removeBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       removeEntry(entry.id);
@@ -245,14 +413,16 @@ function showPreview(entry) {
       img.src = entry.result.dataUrl;
       img.alt = entry.result.filename || "Output";
       img.addEventListener("error", () => {
-        svgPreview.textContent = `Preview không hỗ trợ ${entry.result.format?.toUpperCase() || "format"} này. Vẫn có thể tải file.`;
+        svgPreview.textContent = t("preview.unsupported", {
+          format: entry.result.format?.toUpperCase() || "format",
+        });
       }, { once: true });
       svgPreview.append(img);
     }
     statsLine.textContent = formatStats(entry.result);
   } else {
     svgPreview.replaceChildren();
-    statsLine.textContent = entry.error || "Chưa convert.";
+    statsLine.textContent = entry.error || t("preview.notConverted");
   }
 
   updateActionButtons();
@@ -313,7 +483,7 @@ function addFiles(files) {
   }
 
   if (!added) {
-    showToast("Ảnh đã có trong danh sách");
+    showToast(t("toast.duplicate"));
     return;
   }
 
@@ -323,7 +493,7 @@ function addFiles(files) {
 
   renderFileList();
   showPreview(activeEntry());
-  showToast(`Đã thêm ${added} ảnh`);
+  showToast(t("toast.added", { count: added }));
 }
 
 async function loadMeta() {
@@ -347,16 +517,16 @@ function buildConvertForm(file) {
   const form = new FormData();
   form.append("file", file);
   form.append("output_type", outputTypeSelect.value);
+  form.append("smoothing", smoothingSelect.value);
+  form.append("sharpness", sharpRange.value);
+  form.append("remove_bg", removeBg.checked ? "true" : "false");
+  form.append("trim", trimPad.checked ? "true" : "false");
   if (isSvgOutput()) {
     form.append("svg_mode", svgModeSelect.value);
     if (isVectorSvgMode()) {
       form.append("part", partSelect.value);
-      form.append("smoothing", smoothingSelect.value);
       form.append("color_precision", colorRange.value);
-      form.append("sharpness", sharpRange.value);
     }
-    form.append("remove_bg", removeBg.checked ? "true" : "false");
-    form.append("trim", trimPad.checked ? "true" : "false");
   }
   return form;
 }
@@ -376,7 +546,7 @@ async function convertEntry(entry) {
       const detail = Array.isArray(data.detail)
         ? data.detail.map((item) => item.msg).join(", ")
         : data.detail;
-      throw new Error(detail || "Convert thất bại");
+      throw new Error(detail || t("errors.convertFailed"));
     }
 
     entry.status = "done";
@@ -397,14 +567,17 @@ async function convertAll() {
   if (!fileEntries.length || converting) return;
 
   converting = true;
-  convertBtn.textContent = "Đang convert…";
+  convertBtn.textContent = t("actions.converting");
   updateActionButtons();
 
   let done = 0;
   let failed = 0;
 
   for (const entry of fileEntries) {
-    convertBtn.textContent = `Đang convert ${done + failed + 1}/${fileEntries.length}…`;
+    convertBtn.textContent = t("actions.convertingStep", {
+      current: done + failed + 1,
+      total: fileEntries.length,
+    });
     await convertEntry(entry);
     if (entry.status === "done") done += 1;
     else failed += 1;
@@ -412,15 +585,15 @@ async function convertAll() {
 
   converting = false;
   convertBtn.textContent =
-    fileEntries.length > 1 ? `Convert (${fileEntries.length})` : "Convert";
+    fileEntries.length > 1 ? t("actions.convertCount", { count: fileEntries.length }) : t("actions.convert");
   updateActionButtons();
 
   if (failed === 0) {
-    showToast(`Convert xong ${done} ảnh`);
+    showToast(t("toast.convertDone", { count: done }));
   } else if (done === 0) {
-    showToast(`Convert thất bại ${failed} ảnh`, true);
+    showToast(t("toast.convertFailed", { count: failed }), true);
   } else {
-    showToast(`Xong ${done} ảnh · lỗi ${failed} ảnh`, true);
+    showToast(t("toast.convertMixed", { done, failed }), true);
   }
 }
 
@@ -469,7 +642,7 @@ function exportFile(entry = activeEntry()) {
   const filename = exportFilename(entry.result);
   anchor.download = filename;
   anchor.click();
-  showToast(`Đã export ${filename}`);
+  showToast(t("toast.exported", { filename }));
 }
 
 async function exportAllFiles() {
@@ -482,7 +655,7 @@ async function exportAllFiles() {
   }
 
   exportAllBtn.disabled = true;
-  exportAllBtn.textContent = "Đang tạo ZIP…";
+  exportAllBtn.textContent = t("actions.exportingZip");
 
   try {
     const res = await fetch("/api/export-zip", {
@@ -503,7 +676,7 @@ async function exportAllFiles() {
       const detail = Array.isArray(data.detail)
         ? data.detail.map((item) => item.msg).join(", ")
         : data.detail;
-      throw new Error(detail || "Export ZIP thất bại");
+      throw new Error(detail || t("errors.zipFailed"));
     }
 
     const blob = await res.blob();
@@ -513,7 +686,7 @@ async function exportAllFiles() {
     anchor.download = "image-export.zip";
     anchor.click();
     URL.revokeObjectURL(url);
-    showToast(`Đã export ${entries.length} file vào ZIP`);
+    showToast(t("toast.exportedZip", { count: entries.length }));
   } catch (err) {
     showToast(err.message, true);
   } finally {
@@ -526,7 +699,7 @@ exportSvgBtn.addEventListener("click", exportFile);
 exportAllBtn.addEventListener("click", exportAllFiles);
 
 colorRange.addEventListener("input", () => {
-  colorVal.textContent = colorRange.value === "0" ? "tự động" : colorRange.value;
+  colorVal.textContent = colorRange.value === "0" ? t("values.auto") : colorRange.value;
 });
 sharpRange.addEventListener("input", () => {
   sharpVal.textContent = sharpRange.value;
@@ -539,5 +712,7 @@ svgModeSelect.addEventListener("change", () => {
   updateActionButtons();
   showPreview(activeEntry());
 });
+languageSelect.addEventListener("change", () => setLanguage(languageSelect.value));
 
+setLanguage(currentLang);
 loadMeta().catch((err) => showToast(err.message, true));

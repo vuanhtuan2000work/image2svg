@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,52 +11,61 @@
       <header class="header">
         <div>
           <nav class="top-nav">
-            <a href="/" class="active">Convert</a>
-            <a href="/analyze">Analyze</a>
+            <a href="/" class="active" data-i18n="nav.convert">Convert</a>
+            <a href="/analyze" data-i18n="nav.analyze">Analyze</a>
           </nav>
-          <p class="eyebrow">Local · offline</p>
+          <p class="eyebrow" data-i18n="hero.eyebrow">Local · offline</p>
           <h1>PNG → SVG</h1>
-          <p class="subtitle">vtracer trace + SVGO · preview ngay · export SVG</p>
+          <p class="subtitle" data-i18n="hero.subtitle">Convert images, remove backgrounds, preview instantly, export clean files</p>
         </div>
-        <div class="meta-pill" id="optimizerBadge">…</div>
+        <div class="header-tools">
+          <label class="language-select">
+            <span data-i18n="language.label">Language</span>
+            <select id="languageSelect" aria-label="Language">
+              <option value="en" selected>English</option>
+              <option value="vi">Tiếng Việt</option>
+            </select>
+          </label>
+          <div class="meta-pill" id="optimizerBadge">…</div>
+        </div>
       </header>
 
       <section class="controls card">
-        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Chọn hoặc kéo thả ảnh">
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose or drop images" data-i18n-aria-label="dropzone.aria">
           <input type="file" id="fileInput" accept="image/*,.heic,.heif,.tif,.tiff" multiple hidden />
           <div class="dropzone-inner">
             <div class="drop-icon">↑</div>
-            <p><strong>Chọn ảnh</strong> hoặc kéo thả vào đây</p>
-            <p class="hint">PNG, JPG, WebP · chọn nhiều ảnh cùng lúc</p>
+            <p><strong data-i18n="dropzone.choose">Choose images</strong> <span data-i18n="dropzone.drop">or drop them here</span></p>
+            <p class="hint" data-i18n="dropzone.hint">PNG, JPG, WebP, HEIC, TIFF · multiple files supported</p>
           </div>
         </div>
 
         <section class="file-list-panel" id="fileListPanel" hidden>
           <div class="file-list-header">
-            <h2>Ảnh đã chọn · <span id="fileCount">0</span></h2>
-            <button type="button" class="btn small" id="clearFilesBtn">Xóa tất cả</button>
+            <h2><span data-i18n="files.selected">Selected images</span> · <span id="fileCount">0</span></h2>
+            <button type="button" class="btn small" id="clearFilesBtn" data-i18n="actions.clear">Clear all</button>
           </div>
           <ul class="file-list" id="fileList"></ul>
         </section>
 
         <div class="control-grid">
           <div class="control-row">
-            <label for="partSelect">Loại part</label>
+            <label for="partSelect" data-i18n="controls.part">Part type</label>
             <select id="partSelect">
               <option value="default">default (recipes.yaml)</option>
             </select>
           </div>
 
           <div class="control-row">
-            <label for="svgModeSelect">Kiểu SVG</label>
+            <label for="svgModeSelect" data-i18n="controls.svgMode">SVG mode</label>
             <select id="svgModeSelect">
-              <option value="embedded" selected>Giữ nguyên ảnh/màu</option>
-              <option value="vector">Vector path (vtracer)</option>
+              <option value="embedded" selected data-i18n="options.svgEmbedded">Preserve image/colors</option>
+              <option value="vector" data-i18n="options.svgVector">Vector path (vtracer)</option>
             </select>
           </div>
 
           <div class="control-row">
-            <label for="outputTypeSelect">Định dạng output</label>
+            <label for="outputTypeSelect" data-i18n="controls.output">Output format</label>
             <select id="outputTypeSelect">
               <option value="svg" selected>svg</option>
               <option value="png">png</option>
@@ -72,22 +81,22 @@
           </div>
 
           <div class="control-row">
-            <label for="smoothingSelect">Độ mịn rìa</label>
+            <label for="smoothingSelect" data-i18n="controls.smoothing">Edge smoothing</label>
             <select id="smoothingSelect">
-              <option value="none">none — trace thẳng (nhanh)</option>
-              <option value="low">low — upscale 2x</option>
-              <option value="medium" selected>medium — upscale 3x (khuyên dùng)</option>
-              <option value="high">high — upscale 4x (mịn nhất, chậm)</option>
+              <option value="none" data-i18n="options.smoothingNone">none — direct conversion (fast)</option>
+              <option value="low" data-i18n="options.smoothingLow">low — upscale 2x</option>
+              <option value="medium" selected data-i18n="options.smoothingMedium">medium — upscale 3x (recommended)</option>
+              <option value="high" data-i18n="options.smoothingHigh">high — upscale 4x (smoothest, slower)</option>
             </select>
           </div>
 
           <div class="control-row">
-            <label for="colorRange">Màu sắc chuẩn xác · <span id="colorVal">tự động</span></label>
+            <label for="colorRange"><span data-i18n="controls.color">Color precision</span> · <span id="colorVal" data-i18n="values.auto">auto</span></label>
             <input type="range" id="colorRange" min="0" max="8" step="1" value="0" />
           </div>
 
           <div class="control-row">
-            <label for="sharpRange">Độ rõ nét · <span id="sharpVal">0</span></label>
+            <label for="sharpRange"><span data-i18n="controls.sharpness">Sharpness</span> · <span id="sharpVal">0</span></label>
             <input type="range" id="sharpRange" min="0" max="250" step="10" value="0" />
           </div>
         </div>
@@ -95,26 +104,26 @@
         <div class="toggle-row">
           <label class="switch">
             <input type="checkbox" id="removeBg" />
-            <span>Xóa nền (trong suốt)</span>
+            <span data-i18n="toggles.removeBg">Remove background (transparent)</span>
           </label>
           <label class="switch">
             <input type="checkbox" id="trimPad" />
-            <span>Cắt padding (ôm sát nội dung)</span>
+            <span data-i18n="toggles.trim">Trim padding (fit content)</span>
           </label>
         </div>
 
         <div class="actions">
           <button type="button" class="btn primary" id="convertBtn" disabled>Convert</button>
-          <button type="button" class="btn" id="downloadBtn" disabled>Tải file</button>
-          <button type="button" class="btn accent" id="exportAllBtn" disabled>Export tất cả (ZIP)</button>
+          <button type="button" class="btn" id="downloadBtn" disabled data-i18n="actions.download">Download file</button>
+          <button type="button" class="btn accent" id="exportAllBtn" disabled data-i18n="actions.exportAll">Export all (ZIP)</button>
         </div>
       </section>
 
       <section class="preview-grid" id="previewGrid" hidden>
         <article class="card preview-panel">
-          <h2>Ảnh gốc</h2>
+          <h2 data-i18n="preview.source">Source image</h2>
           <div class="preview-frame checker">
-            <img id="sourcePreview" alt="Ảnh gốc" />
+            <img id="sourcePreview" alt="Source image" data-i18n-alt="preview.source" />
           </div>
           <p class="file-name" id="sourceName"></p>
         </article>
@@ -122,7 +131,7 @@
         <article class="card preview-panel">
           <div class="panel-head">
             <h2>Output</h2>
-            <button type="button" class="btn small accent" id="exportSvgBtn" disabled>Export file</button>
+            <button type="button" class="btn small accent" id="exportSvgBtn" disabled data-i18n="actions.exportFile">Export file</button>
           </div>
           <div class="preview-frame checker" id="svgPreview"></div>
           <p class="stats" id="statsLine"></p>

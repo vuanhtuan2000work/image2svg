@@ -96,6 +96,25 @@ h1 {
   white-space: nowrap;
 }
 
+.header-tools {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.language-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.language-select select {
+  min-width: 128px;
+  padding: 8px 10px;
+}
+
 .card {
   background: rgba(23, 26, 33, 0.92);
   border: 1px solid var(--border);
@@ -441,5 +460,9 @@ input[type="range"] {
 
   .header {
     flex-direction: column;
+  }
+
+  .header-tools {
+    justify-content: flex-start;
   }
 }
