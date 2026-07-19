@@ -1,0 +1,38 @@
+{
+  "name": "open-source-repo-skill",
+  "version": "1.0.0",
+  "description": "Install the open-source-repo Agent Skill into Cursor, Claude Code, Codex, Gemini CLI, and .agents",
+  "type": "module",
+  "bin": {
+    "open-source-repo-skill": "./bin/install.mjs"
+  },
+  "files": [
+    "bin/",
+    "skill/",
+    "README.md"
+  ],
+  "keywords": [
+    "agent-skills",
+    "skill.md",
+    "cursor",
+    "claude",
+    "codex",
+    "gemini",
+    "open-source"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vuanhtuan2000work/image2svg.git",
+    "directory": "skills/installer"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "sync": "node ./scripts/sync-skill.mjs",
+    "prepack": "node ./scripts/sync-skill.mjs",
+    "install-skill": "node ./bin/install.mjs install",
+    "install-skill:global": "node ./bin/install.mjs install --global"
+  }
+}

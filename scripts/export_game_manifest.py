@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze an SVG frame strip and write feed-your-pet game manifest JSON."""
+"""Analyze an SVG frame strip and write a game manifest JSON file."""
 
 from __future__ import annotations
 
@@ -8,12 +8,8 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from svg_analyze import analyze_svg
-from svg_analyze.export.write_game_manifest import resolve_game_root, write_sheet_manifest
+from image2svg.analyze import analyze_svg
+from image2svg.analyze.export.write_game_manifest import resolve_game_root, write_sheet_manifest
 
 
 def main() -> int:
@@ -23,7 +19,7 @@ def main() -> int:
         "--game-root",
         type=Path,
         default=None,
-        help="feed-your-pet root (default: ../game-2d/feed-your-pet or IMAGE2SVG_GAME_ROOT)",
+        help="Game project root (default: IMAGE2SVG_GAME_ROOT or sibling feed-your-pet path)",
     )
     parser.add_argument(
         "--analysis-out",
@@ -34,17 +30,17 @@ def main() -> int:
     parser.add_argument(
         "--ml-landmarks",
         action="store_true",
-        help="Enable silhouette ML landmark pass (set IMAGE2SVG_ML_LANDMARKS=1)",
+        help="Enable silhouette ML landmark pass",
     )
     parser.add_argument(
         "--mmpose",
         action="store_true",
-        help="Also try MMPose if installed (needs requirements-ml.txt + model env vars)",
+        help="Also try MMPose if installed (see requirements-ml.txt)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Analyze only; do not write into game directory",
+        help="Analyze only; do not write into the game directory",
     )
     args = parser.parse_args()
 
@@ -63,7 +59,10 @@ def main() -> int:
 
     if args.analysis_out:
         args.analysis_out.parent.mkdir(parents=True, exist_ok=True)
-        args.analysis_out.write_text(json.dumps(analysis, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        args.analysis_out.write_text(
+            json.dumps(analysis, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         print(f"Wrote analysis: {args.analysis_out}")
 
     if args.dry_run:

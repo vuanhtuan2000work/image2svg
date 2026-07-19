@@ -1,161 +1,254 @@
-# SVG Asset Pipeline
+# image2svg
 
-Pipeline local (offline) batch chuyển PNG → SVG cho thư viện asset modular.
+Local (offline) image → SVG pipeline powered by [vtracer](https://github.com/visioncortex/vtracer), with a batch CLI and a small FastAPI web UI.
 
-**Bước 1–2 (tự động):** vtracer trace + SVGO/scour tối ưu  
-**Bước 3 (thủ công):** gom layer, gradient, metadata/anchor — dùng `prompts/organize_svg.md` với GPT/Cursor
+**Core flow:** preprocess (optional upscale / sharpen / remove-bg / trim) → vectorize → optimize (SVGO or scour).
 
-## Cấu trúc
+## Documentation / Tài liệu
 
-```
-svg-asset-pipeline/
-  assets/
-    raw/<part>/*.png    # input
-    out/<part>/*.svg    # output sau trace + optimize
-  recipes.yaml          # tham số vtracer theo part_type
-  convert.py            # CLI chính
-  prompts/
-    organize_svg.md     # template bước 3
-```
+| Language | Usage guide |
+|----------|-------------|
+| Tiếng Việt | [docs/usage/vi.md](docs/usage/vi.md) |
+| English | [docs/usage/en.md](docs/usage/en.md) |
+| 中文 | [docs/usage/zh.md](docs/usage/zh.md) |
 
-## Cài đặt
+**Libraries used (full list):** [docs/libraries.md](docs/libraries.md)
+
+**Agent Skill (Cursor / Claude / Codex / Gemini):** [docs/agent-skill.md](docs/agent-skill.md)
+
+## Agent Skill — install once, use in any agent
+
+This repo ships an [Agent Skills](https://agentskills.io/) playbook named **`open-source-repo`** so coding agents can open-source other projects the same way.
 
 ```bash
-cd ~/Projects/svg-asset-pipeline
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# Python (works without Node) — preferred
+python skills/installer/install.py install          # this project
+python skills/installer/install.py install --global # ALL projects (high trust)
+
+# npm from this clone (Node 18+) — preferred over unpinned registry
+npx --yes ./skills/installer install
+
+# After npm publish: always pin the version
+# npx open-source-repo-skill@1.0.0 install
 ```
 
-**Tối ưu SVG:** ưu tiên SVGO qua `npx` (cần Node). Nếu không có Node, pipeline dùng `scour` (Python). Không có cả hai → bỏ qua optimize và in cảnh báo.
+Before push/publish, run the gate:
 
-Kiểm tra SVGO:
+```bash
+python scripts/prepublish-check.py
+```
+
+Then in Cursor / Claude / Codex / Gemini chat:
+
+```text
+/open-source-repo
+```
+
+or ask: `làm open source repo này` / `open-source this repository`.
+
+Already vendored for this checkout under `.cursor/skills/`, `.claude/skills/`, `.codex/skills/`, `.gemini/skills/`, `.agents/skills/`.
+
+## Related libraries (quick view)
+
+| Role | Library |
+|------|---------|
+| Vectorize image → SVG | [vtracer](https://github.com/visioncortex/vtracer) |
+| Image processing | [Pillow](https://python-pillow.org/), [pillow-heif](https://github.com/bigcat88/pillow_heif) |
+| Recipes config | [PyYAML](https://pyyaml.org/) |
+| SVG optimize | [SVGO](https://github.com/svg/svgo) (`npx`) or [scour](https://github.com/scour-project/scour) |
+| Web UI / API | [FastAPI](https://fastapi.tiangolo.com/), [Uvicorn](https://www.uvicorn.org/), python-multipart, Pydantic |
+| SVG strip analyze | [svg.path](https://github.com/regebro/svg.path), [NumPy](https://numpy.org/), [PuLP](https://coin-or.github.io/pulp/) |
+| Remove background *(optional)* | BiRefNet HTTP / [BEN2](https://github.com/PramaLLC/BEN2)+PyTorch / [rembg](https://github.com/danielgatis/rembg) |
+| Cloudflare Worker *(optional)* | [fflate](https://github.com/101arrowz/fflate), [upng-js](https://github.com/photopea/UPNG.js), [Wrangler](https://developers.cloudflare.com/workers/wrangler/) |
+
+## Features
+
+- Batch convert `assets/raw/<part>/*.png` → `assets/out/<part>/*.svg`
+- Per-part recipes in `configs/recipes.yaml`
+- Web UI for live preview and parameter tuning
+- Optional SVG strip analyzer (`/analyze`) for game-manifest export
+- Optional Cloudflare Worker deploy for a lighter hosted convert UI
+
+## Repository layout
+
+```text
+image2svg/
+├── configs/                 # Human-editable defaults (recipes)
+├── deployments/cloudflare/  # Optional Worker
+├── docs/                    # Usage, libraries, agent-skill
+├── examples/                # Extra samples (optional)
+├── scripts/                 # Maintainer utilities
+├── skills/                  # Agent Skill + npm/python installer
+│   ├── open-source-repo/    # SKILL.md (canonical)
+│   └── installer/           # open-source-repo-skill CLI
+├── src/image2svg/           # Installable Python package
+│   ├── analyze/             # Multi-pass SVG strip compiler
+│   ├── background/          # Background-removal engines
+│   ├── convert/             # Trace + preprocess pipeline
+│   ├── web/                 # FastAPI app + static UI
+│   └── cli.py               # `image2svg` entry point
+├── assets/                  # Local workspace for raw/out PNGs
+└── tests/
+```
+
+## Requirements
+
+- Python 3.10+
+- Optional: Node.js (for SVGO via `npx`)
+- Optional: system Cairo / librsvg for some analyze raster paths
+
+## Install
+
+```bash
+git clone https://github.com/vuanhtuan2000work/image2svg.git
+cd image2svg
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+
+pip install -e .
+```
+
+Development extras:
+
+```bash
+pip install -e ".[dev]"
+```
+
+Check SVGO (recommended optimizer):
 
 ```bash
 npx svgo --version
 ```
 
-## Web UI (preview + copy GPT)
+> `requirements.txt` remains as a thin pointer for older workflows. Prefer `pip install -e .`.
+
+## Quick start
+
+### CLI batch convert
 
 ```bash
-source .venv/bin/activate
-pip install -r requirements.txt   # nếu chưa cài fastapi/uvicorn
-python server.py
+# All part folders under assets/raw/
+image2svg convert
+
+# One part type
+image2svg convert --part eye --smoothing high --color-precision 8 --sharpness 80 --remove-bg --trim
+
+# Legacy form (still supported)
+image2svg --part eye --overwrite
 ```
 
-Mở **http://127.0.0.1:8765** — kéo thả/chọn PNG, tinh chỉnh và xem SVG ngay trong trang. Mọi thay đổi control sẽ tự convert lại.
-
-Controls:
-
-| Control | Tác dụng | Backend |
-|---------|----------|---------|
-| **Độ mịn rìa** | Upscale + blur làm mượt cạnh | `smoothing` |
-| **Màu sắc chuẩn xác** | Số bit màu/kênh (1–8, cao = nhiều màu hơn) | `color_precision` |
-| **Độ rõ nét** | Unsharp mask trước trace (0–250) | `sharpness` |
-| **Xóa nền** | Flood-fill từ viền → nền trong suốt; giữ vùng sáng bên trong object; lọc connected-component bỏ thanh/vụn rời rạc, chỉ giữ object chính | `remove_bg` |
-| **Cắt padding** | Crop sát nội dung, viewBox ôm khít, không thừa lề | `trim` |
-
-Nút **Export SVG** (góc phải panel output) và **Tải SVG** đều tải file `.svg`. **Copy prompt GPT** copy template bước 3 kèm SVG để dán vào ChatGPT/Cursor.
-
-Tương đương CLI:
+### Web UI
 
 ```bash
-python convert.py --part eye --smoothing high --color-precision 8 --sharpness 80 --remove-bg --trim
+image2svg serve
+# or
+image2svg-server
 ```
 
-## Analyze + game export (`/analyze`)
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765).
 
-Màn **Analyze** (http://127.0.0.1:8765/analyze) chạy compiler 8-pass trên SVG frame strip: tách frame, scene graph, skeleton QA, temporal smoothing.
+Analyze UI: [http://127.0.0.1:8765/analyze](http://127.0.0.1:8765/analyze)
 
-Output JSON gồm:
+### Python API
 
-- `gameManifest` — frame rects tương thích **feed-your-pet** (Phaser 3 SVG sprite, không phải bone rig)
-- `stackRecommendation` — lý do không dùng Spine/DragonBones; ML (MMPose/DeepLabCut) chỉ optional Phase 2
+```python
+from image2svg.convert import convert_image_bytes
 
-Chi tiết so sánh stack: [docs/ANIMATION_STACK.md](docs/ANIMATION_STACK.md)
+svg, params, optimizer, elapsed = convert_image_bytes(
+    open("assets/raw/eye/eye_purple_01.png", "rb").read(),
+    part="eye",
+    smoothing="high",
+    remove_bg=True,
+    trim=True,
+)
+```
 
-### Export manifest sang feed-your-pet
+## Web UI controls
+
+| Control | Effect | Backend |
+|---------|--------|---------|
+| Edge smoothness | Lanczos upscale before trace | `smoothing` |
+| Color accuracy | Bits per channel (1–8) | `color_precision` |
+| Sharpness | Unsharp mask (0–250) | `sharpness` |
+| Remove background | Engine chain → transparent alpha | `remove_bg` |
+| Trim padding | Crop to content / tight viewBox | `trim` |
+
+## Recipes
+
+Edit `configs/recipes.yaml` (mirrored in the package as `src/image2svg/config/recipes.yaml`).
+
+| Symptom | Try |
+|---------|-----|
+| Too many color shards / broken gradients | Raise `layer_difference`, lower `color_precision` |
+| Lost detail / highlights | Lower `filter_speckle`, raise `color_precision` |
+| Over-rounded corners | Lower `corner_threshold` |
+| Heavy paths | Lower `path_precision` (2–3 is usually enough) |
+| Single-color line art | `colormode: binary` |
+
+Override path with `IMAGE2SVG_RECIPES=/path/to/recipes.yaml`.
+
+## Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `HOST` / `PORT` | Web server bind address |
+| `IMAGE2SVG_RECIPES` | Custom recipes YAML |
+| `IMAGE2SVG_ASSETS_ROOT` | Custom assets root (contains `raw/` + `out/`) |
+| `IMAGE2SVG_DATA_DIR` | Runtime data (correction memory, etc.) |
+| `IMAGE2SVG_GAME_ROOT` | External game project root for manifest export |
+| `IMAGE2SVG_ML_LANDMARKS` / `IMAGE2SVG_MMPOSE` | Optional analyze ML passes |
+| `IMAGE2SVG_BIREFNET_URL` | Optional remote BiRefNet endpoint |
+| `IMAGE2SVG_BEN2_ALLOW_DOWNLOAD` / `IMAGE2SVG_REMBG_ALLOW_DOWNLOAD` | Allow on-demand model downloads |
+
+## Analyze + game export
+
+See [docs/animation-stack.md](docs/animation-stack.md).
 
 ```bash
-# Ghi manifest vào game (mặc định ../game-2d/feed-your-pet)
-.venv/bin/python scripts/export_game_manifest.py \
-  ../game-2d/feed-your-pet/public/assets/pet/cat_actions/run/4-Balinese-lengend/1-Balinese-lengend.svg
-
-# Bật ML landmarks (silhouette; thêm --mmpose nếu đã cài .venv-ml qua scripts/install-ml-deps.sh)
-.venv/bin/python scripts/export_game_manifest.py path/to/sheet.svg --ml-landmarks
-
-# Sau đó trong game repo:
-cd ../game-2d/feed-your-pet && node scripts/generate-cat-variants.mjs
+python scripts/export_game_manifest.py path/to/sheet.svg --dry-run
 ```
 
-API: `POST /api/export-game-manifest` (form: `file`, optional `asset_path`, `game_root`, `ml_landmarks`, `mmpose`).
+API: `POST /api/export-game-manifest`.
 
-Biến môi trường: `IMAGE2SVG_GAME_ROOT`, `IMAGE2SVG_ML_LANDMARKS=1`, `IMAGE2SVG_MMPOSE=1`.
-
-## Chạy pipeline CLI
+## Cloudflare deploy (optional)
 
 ```bash
-source .venv/bin/activate
-
-# Tất cả part trong assets/raw/
-python convert.py
-
-# Chỉ một loại part
-python convert.py --part eye
-
-# Ghi đè SVG đã có
-python convert.py --part eye --overwrite
+npm install
+npm run deploy
 ```
 
-Output mirror cấu trúc `raw/`: `assets/raw/eye/foo.png` → `assets/out/eye/foo.svg`.
+Worker source lives in `deployments/cloudflare/`. This path is a lighter convert UI and does not run the full Python analyzer.
 
-## Thêm part mới
+## Background removal notes
 
-1. Tạo folder `assets/raw/<part_type>/` và bỏ PNG vào.
-2. Thêm block trong `recipes.yaml` → `parts.<part_type>` (override `default` nếu cần).
-3. Chạy `python convert.py --part <part_type>`.
+When `--remove-bg` / UI toggle is on, engines are tried in order:
 
-## Tinh chỉnh `recipes.yaml`
+1. BiRefNet HTTP service (`IMAGE2SVG_BIREFNET_URL`)
+2. Cached/local BEN2
+3. Cached rembg
+4. Heuristic flood-fill fallback
 
-| Triệu chứng | Hướng xử lý |
-|-------------|-------------|
-| Quá nhiều mảnh màu / gradient vỡ | Tăng `layer_difference`, giảm `color_precision` |
-| Mất chi tiết / highlight | Giảm `filter_speckle`, tăng `color_precision` |
-| Bo tròn quá, mất góc nhọn | Giảm `corner_threshold` |
-| File nặng, path dài | Giảm `path_precision` (2–3 đủ cho chibi) |
-| Line-art 1 màu | `colormode: binary` |
+Heavy ML stacks are **not** installed by default. See comments in `requirements.txt` / `requirements-ml.txt`.
 
-Tham số vtracer hợp lệ: `colormode`, `hierarchical`, `mode`, `filter_speckle`, `color_precision`, `layer_difference`, `corner_threshold`, `length_threshold`, `max_iterations`, `splice_threshold`, `path_precision`.
+## Contributing
 
-**Lưu ý:** Python binding không có `gradient_step` — gom dải gradient bằng `layer_difference`.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
 
-## Làm mịn rìa (anti-aliasing)
+## License
 
-vtracer trace thẳng trên ảnh nhỏ sẽ bám theo từng pixel → viền răng cưa. Pipeline
-khắc phục bằng cách **CHỈ upscale ảnh (Lanczos) TRƯỚC khi trace** — Lanczos tự tạo cạnh
-chuyển màu mượt ở RÌA nên vtracer fit spline cong, mà KHÔNG đụng tới màu/hình bên trong.
-Output ép `viewBox` về kích thước gốc nên không phình file hiển thị.
+[MIT](LICENSE)
 
-| Mức | Upscale | Khi nào dùng |
-|-----|---------|--------------|
-| `none` | 1x | Line-art sắc, hoặc cần nhanh |
-| `low` | 2x | Cân bằng, file nhỏ |
-| `medium` (mặc định) | 3x | Hầu hết asset |
-| `high` | 4x | Mịn rìa nhất |
+## Acknowledgements
 
-**Quan trọng:** KHÔNG dùng GaussianBlur. Blur làm mịn cả vùng màu → méo hình, mất
-highlight. Độ mịn rìa hoàn toàn đến từ upscale Lanczos. `filter_speckle` scale tuyến
-tính theo `upscale` (không bình phương) để không xoá mất chi tiết nhỏ.
+See [docs/libraries.md](docs/libraries.md) for the complete dependency map.
 
-CLI: `python convert.py --part eye --smoothing high`. Web UI: chọn dropdown **Độ mịn rìa**.
-
-## Bước 3 — tổ chức modular (thủ công)
-
-1. Mở SVG trong `assets/out/`.
-2. Copy nội dung vào `prompts/organize_svg.md` (phần placeholder).
-3. Dán prompt vào GPT/Cursor — **không sửa geometry**, chỉ layer + gradient + metadata + anchors.
-
-## Rủi ro / giới hạn
-
-- vtracer tách theo **vùng màu**, không hiểu semantic iris/pupil/highlight → cần bước 3.
-- Gradient gốc thành nhiều fill phẳng → bước 3 thay bằng `<radialGradient>` cho mượt và nhẹ hơn.
+- [vtracer](https://github.com/visioncortex/vtracer) — vectorization
+- Pillow / pillow-heif — image I/O and preprocess
+- FastAPI / Uvicorn — local web UI
+- SVGO / scour — SVG optimization
+- svg.path, NumPy, PuLP — analyze pipeline
+- Optional: rembg, BEN2, PyTorch, OpenMMLab (mmpose), Cloudflare Worker stack

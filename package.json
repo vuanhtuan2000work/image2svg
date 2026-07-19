@@ -1,9 +1,11 @@
 {
-  "name": "image2svg-convert-cloudflare",
+  "name": "image2svg-cloudflare",
   "private": true,
   "type": "module",
+  "description": "Optional Cloudflare Worker deploy for the image2svg convert UI",
   "scripts": {
     "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
     "cf:dev": "wrangler dev"
   },
   "dependencies": {
