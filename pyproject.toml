@@ -5,14 +5,26 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "image2svg"
 version = "0.3.0"
-description = "Local PNG/image to SVG pipeline with vtracer, batch CLI, and a small web UI"
+description = "Offline PNG/JPEG to SVG converter — local raster-to-vector CLI and web UI powered by vtracer"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
   { name = "image2svg contributors" },
 ]
-keywords = ["svg", "vtracer", "vectorize", "image-processing", "fastapi"]
+keywords = [
+  "svg",
+  "png-to-svg",
+  "image-to-svg",
+  "raster-to-vector",
+  "vectorize",
+  "vtracer",
+  "batch-convert",
+  "offline",
+  "self-hosted",
+  "fastapi",
+  "game-assets",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Console",
