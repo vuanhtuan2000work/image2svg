@@ -17,6 +17,16 @@ import yaml
 from PIL import Image, ImageChops, ImageFilter
 
 from image2svg.background import get_last_background_engine, remove_background
+from image2svg.convert.constants import (
+    DEFAULT_SHARPNESS,
+    DEFAULT_SMOOTHING,
+    NO_ALPHA_OUTPUTS,
+    PIL_SAVE_FORMATS,
+    RASTER_MIME_TYPES,
+    RASTER_OUTPUT_FORMATS,
+    SMOOTHING_PRESETS,
+    VTRACER_KEYS,
+)
 from image2svg.paths import recipes_path
 
 try:
@@ -25,59 +35,6 @@ try:
     pillow_heif.register_heif_opener()
 except Exception:
     pillow_heif = None
-
-VTRACER_KEYS = {
-    "colormode",
-    "hierarchical",
-    "mode",
-    "filter_speckle",
-    "color_precision",
-    "layer_difference",
-    "corner_threshold",
-    "length_threshold",
-    "max_iterations",
-    "splice_threshold",
-    "path_precision",
-}
-
-# Preset làm mịn rìa: CHỈ upscale ảnh (nội suy Lanczos) TRƯỚC khi trace. Lanczos tự
-# tạo cạnh chuyển màu mượt (anti-alias) ở RÌA nên vtracer fit spline cong thay vì bám
-# pixel răng cưa — mà KHÔNG đụng tới màu/hình bên trong.
-# KHÔNG dùng GaussianBlur: blur làm mịn cả vùng màu -> méo hình, mất highlight.
-SMOOTHING_PRESETS = {
-    "none": {"upscale": 1, "blur": 0.0},
-    "low": {"upscale": 2, "blur": 0.0},
-    "medium": {"upscale": 3, "blur": 0.0},
-    "high": {"upscale": 4, "blur": 0.0},
-}
-DEFAULT_SMOOTHING = "medium"
-DEFAULT_SHARPNESS = 80
-OUTPUT_FORMATS = ("jpg", "jpeg", "png", "webp", "avif", "gif", "svg", "bmp", "tiff", "heic")
-SVG_MODES = ("embedded", "vector")
-RASTER_OUTPUT_FORMATS = tuple(fmt for fmt in OUTPUT_FORMATS if fmt != "svg")
-RASTER_MIME_TYPES = {
-    "jpg": "image/jpeg",
-    "jpeg": "image/jpeg",
-    "png": "image/png",
-    "webp": "image/webp",
-    "avif": "image/avif",
-    "gif": "image/gif",
-    "bmp": "image/bmp",
-    "tiff": "image/tiff",
-    "heic": "image/heic",
-}
-PIL_SAVE_FORMATS = {
-    "jpg": "JPEG",
-    "jpeg": "JPEG",
-    "png": "PNG",
-    "webp": "WEBP",
-    "avif": "AVIF",
-    "gif": "GIF",
-    "bmp": "BMP",
-    "tiff": "TIFF",
-    "heic": "HEIF",
-}
-NO_ALPHA_OUTPUTS = {"jpg", "jpeg", "bmp"}
 
 
 @dataclass(frozen=True)
@@ -141,7 +98,7 @@ def optimize(svg_path: Path, optimizer: str) -> None:
         svg_path.write_text(scour_mod.scourString(src, opts))
 
 
-def _detect_bg_color(img: "Image.Image") -> tuple[int, int, int]:
+def _detect_bg_color(img: Image.Image) -> tuple[int, int, int]:
     """Lấy màu nền từ trung vị các pixel viền (4 cạnh)."""
     rgb = img.convert("RGB")
     w, h = rgb.size
@@ -155,11 +112,11 @@ def _detect_bg_color(img: "Image.Image") -> tuple[int, int, int]:
     for y in range(0, h, step_y):
         samples.append(px[0, y])
         samples.append(px[w - 1, y])
-    channels = list(zip(*samples))
+    channels = list(zip(*samples, strict=False))
     return tuple(int(sorted(c)[len(c) // 2]) for c in channels)  # type: ignore[return-value]
 
 
-def trim_to_content(img: "Image.Image") -> "Image.Image":
+def trim_to_content(img: Image.Image) -> Image.Image:
     """Cắt sát nội dung (bỏ padding). Ưu tiên alpha, fallback theo màu nền."""
     img = img.convert("RGBA")
     alpha = img.getchannel("A")
@@ -222,13 +179,13 @@ def preprocess_image(
     return buf.getvalue(), orig_size
 
 
-def _flatten_alpha(img: "Image.Image", background: tuple[int, int, int] = (255, 255, 255)) -> "Image.Image":
+def _flatten_alpha(img: Image.Image, background: tuple[int, int, int] = (255, 255, 255)) -> Image.Image:
     img = img.convert("RGBA")
     canvas = Image.new("RGBA", img.size, (*background, 255))
     return Image.alpha_composite(canvas, img).convert("RGB")
 
 
-def _save_raster_image(img: "Image.Image", output_type: str) -> bytes:
+def _save_raster_image(img: Image.Image, output_type: str) -> bytes:
     output_type = output_type.lower()
     if output_type not in RASTER_OUTPUT_FORMATS:
         raise ValueError(f"Định dạng output không hỗ trợ: {output_type}")
@@ -257,7 +214,7 @@ def _save_raster_image(img: "Image.Image", output_type: str) -> bytes:
     return buf.getvalue()
 
 
-def _png_bytes_for_svg_embed(img: "Image.Image") -> bytes:
+def _png_bytes_for_svg_embed(img: Image.Image) -> bytes:
     buf = BytesIO()
     img.convert("RGBA").save(buf, format="PNG")
     return buf.getvalue()
@@ -502,7 +459,7 @@ def _normalize_svg_size(svg: str, orig_w: int, orig_h: int) -> str:
         return svg
     up_w, up_h = float(m.group(1)), float(m.group(2))
 
-    def repl(match: "re.Match") -> str:
+    def repl(match: re.Match) -> str:
         tag = match.group(0)
         if "viewBox" not in tag:
             tag = tag.replace("<svg", f'<svg viewBox="0 0 {up_w:g} {up_h:g}"', 1)

@@ -1,6 +1,6 @@
 """Image conversion and vectorization helpers."""
 
-from image2svg.convert.pipeline import (
+from image2svg.convert.constants import (
     DEFAULT_SHARPNESS,
     DEFAULT_SMOOTHING,
     OUTPUT_FORMATS,
@@ -9,6 +9,8 @@ from image2svg.convert.pipeline import (
     SMOOTHING_PRESETS,
     SVG_MODES,
     VTRACER_KEYS,
+)
+from image2svg.convert.pipeline import (
     convert_embedded_svg_bytes,
     convert_image_bytes,
     convert_one,

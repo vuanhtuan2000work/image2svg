@@ -16,6 +16,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "open-source-repo" / "SKILL.md"
 PACKAGED = ROOT / "skills" / "installer" / "skill" / "SKILL.md"
+VENDORED = [
+    ROOT / ".agents" / "skills" / "open-source-repo" / "SKILL.md",
+    ROOT / ".cursor" / "skills" / "open-source-repo" / "SKILL.md",
+]
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
 
@@ -43,7 +47,6 @@ def check_skill_md() -> bool:
     if "description:" not in match.group(1):
         _fail("SKILL.md missing description")
         return False
-    # Extract name line value
     name_line = next((ln for ln in match.group(1).splitlines() if ln.startswith("name:")), "")
     name = name_line.split(":", 1)[1].strip()
     if not NAME_RE.match(name):
@@ -63,32 +66,21 @@ def check_skill_md() -> bool:
 
 def check_sync() -> bool:
     if not PACKAGED.is_file():
-        _fail("skills/installer/skill/SKILL.md missing — sync before publish")
+        _fail("skills/installer/skill/SKILL.md missing — run scripts/sync-agent-skills.py")
         return False
-    if SKILL.read_bytes() != PACKAGED.read_bytes():
-        _fail("canonical skill != installer/skill copy — sync with Copy-Item or sync-skill.mjs")
+    canonical = SKILL.read_bytes()
+    if canonical != PACKAGED.read_bytes():
+        _fail("canonical skill != installer/skill — run scripts/sync-agent-skills.py")
         return False
-    _ok("installer skill copy matches canonical")
-    return True
-
-
-def check_vendored() -> bool:
-    dirs = [
-        ".cursor/skills/open-source-repo/SKILL.md",
-        ".claude/skills/open-source-repo/SKILL.md",
-        ".codex/skills/open-source-repo/SKILL.md",
-        ".gemini/skills/open-source-repo/SKILL.md",
-        ".agents/skills/open-source-repo/SKILL.md",
-    ]
-    ok = True
-    for rel in dirs:
-        path = ROOT / rel
+    for path in VENDORED:
         if not path.is_file():
-            _fail(f"missing vendored skill {rel}")
-            ok = False
-    if ok:
-        _ok("vendored agent skill copies present")
-    return ok
+            _fail(f"missing vendored skill {path.relative_to(ROOT)}")
+            return False
+        if path.read_bytes() != canonical:
+            _fail(f"vendored skill drift: {path.relative_to(ROOT)}")
+            return False
+    _ok("installer + .agents/.cursor skill copies match canonical")
+    return True
 
 
 def _python() -> str:
@@ -104,16 +96,7 @@ def _python() -> str:
 
 def run_pytest() -> bool:
     py = _python()
-    cmd = [
-        py,
-        "-m",
-        "pytest",
-        "-q",
-        str(ROOT / "tests" / "test_skill_md.py"),
-        str(ROOT / "tests" / "test_skill_installer.py"),
-        str(ROOT / "tests" / "test_paths_and_recipes.py"),
-        str(ROOT / "tests" / "test_cli_help.py"),
-    ]
+    cmd = [py, "-m", "pytest", "-q"]
     proc = subprocess.run(cmd, cwd=ROOT, check=False)
     if proc.returncode != 0:
         _fail(f"pytest failed (python={py})")
@@ -127,7 +110,6 @@ def main() -> int:
     checks = [
         check_skill_md(),
         check_sync(),
-        check_vendored(),
         run_pytest(),
     ]
     if all(checks):

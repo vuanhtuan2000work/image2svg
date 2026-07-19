@@ -92,11 +92,8 @@ def test_installer_skill_copy_matches_canonical() -> None:
 @pytest.mark.parametrize(
     "agent_dir",
     [
-        ".cursor/skills/open-source-repo",
-        ".claude/skills/open-source-repo",
-        ".codex/skills/open-source-repo",
-        ".gemini/skills/open-source-repo",
         ".agents/skills/open-source-repo",
+        ".cursor/skills/open-source-repo",
     ],
 )
 def test_vendored_project_skills_present(agent_dir: str) -> None:
@@ -104,3 +101,4 @@ def test_vendored_project_skills_present(agent_dir: str) -> None:
     assert skill.is_file(), f"Missing vendored skill at {agent_dir}"
     meta = _parse_frontmatter(skill.read_text(encoding="utf-8"))
     assert meta.get("name") == "open-source-repo"
+    assert skill.read_text(encoding="utf-8") == SKILL_MD.read_text(encoding="utf-8")

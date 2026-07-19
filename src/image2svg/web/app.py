@@ -6,11 +6,12 @@ import base64
 import json
 import queue
 import threading
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
+from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -18,13 +19,16 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from image2svg.analyze import analyze_svg
+from image2svg.analyze.correction_memory import list_corrections, save_corrections_batch
+from image2svg.analyze.export.write_game_manifest import resolve_game_root, write_sheet_manifest
 from image2svg.convert import (
     DEFAULT_SHARPNESS,
     DEFAULT_SMOOTHING,
     OUTPUT_FORMATS,
     RASTER_MIME_TYPES,
-    SVG_MODES,
     SMOOTHING_PRESETS,
+    SVG_MODES,
     convert_embedded_svg_bytes,
     convert_image_bytes,
     convert_raster_image_bytes,
@@ -32,16 +36,11 @@ from image2svg.convert import (
     list_part_types,
     load_recipes,
 )
-
-from image2svg.analyze import analyze_svg
-from image2svg.analyze.correction_memory import list_corrections, save_corrections_batch
-from image2svg.analyze.export.write_game_manifest import resolve_game_root, write_sheet_manifest
-
 from image2svg.paths import web_dir
 
 WEB_DIR = web_dir()
 
-app = FastAPI(title="image2svg", version="0.2.0")
+app = FastAPI(title="image2svg", version="0.3.0")
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
 ALLOWED_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif", ".bmp", ".tif", ".tiff", ".heic", ".heif"}

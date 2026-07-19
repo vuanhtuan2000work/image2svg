@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-import uuid
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -227,8 +227,8 @@ def _multipart_png_body(img: Image.Image, *, field_name: str) -> tuple[bytes, st
         f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="{field_name}"; filename="input.png"\r\n'
         "Content-Type: image/png\r\n\r\n"
-    ).encode("utf-8")
-    tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
+    ).encode()
+    tail = f"\r\n--{boundary}--\r\n".encode()
     return head + png.getvalue() + tail, f"multipart/form-data; boundary={boundary}"
 
 
@@ -245,7 +245,7 @@ def _detect_bg_color(img: Image.Image) -> tuple[int, int, int]:
     for y in range(0, h, step_y):
         samples.append(px[0, y])
         samples.append(px[w - 1, y])
-    channels = list(zip(*samples))
+    channels = list(zip(*samples, strict=False))
     return tuple(int(sorted(c)[len(c) // 2]) for c in channels)  # type: ignore[return-value]
 
 

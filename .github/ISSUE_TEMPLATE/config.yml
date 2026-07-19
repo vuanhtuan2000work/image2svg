@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage docs
+    url: https://github.com/vuanhtuan2000work/image2svg/blob/master/docs/usage/en.md
+    about: Install and usage guides (EN / VI / ZH)

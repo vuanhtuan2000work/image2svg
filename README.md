@@ -1,8 +1,23 @@
 # image2svg
 
+[![CI](https://github.com/vuanhtuan2000work/image2svg/actions/workflows/ci.yml/badge.svg)](https://github.com/vuanhtuan2000work/image2svg/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.3.0-informational.svg)](CHANGELOG.md)
+
 Local (offline) image → SVG pipeline powered by [vtracer](https://github.com/visioncortex/vtracer), with a batch CLI and a small FastAPI web UI.
 
 **Core flow:** preprocess (optional upscale / sharpen / remove-bg / trim) → vectorize → optimize (SVGO or scour).
+
+## Status
+
+| Area | State |
+|------|--------|
+| Package | `pip install -e .` / `image2svg` CLI |
+| Docs | EN / VI / ZH + [libraries map](docs/libraries.md) |
+| Tests + CI | Pytest + Ruff + skill gate on 3.10–3.12 |
+| Community | LICENSE, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue templates |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Documentation / Tài liệu
 
@@ -46,7 +61,12 @@ Then in Cursor / Claude / Codex / Gemini chat:
 
 or ask: `làm open source repo này` / `open-source this repository`.
 
-Already vendored for this checkout under `.cursor/skills/`, `.claude/skills/`, `.codex/skills/`, `.gemini/skills/`, `.agents/skills/`.
+Committed skill copies (kept in sync via `python scripts/sync-agent-skills.py`):
+
+- `.agents/skills/open-source-repo/`
+- `.cursor/skills/open-source-repo/`
+
+For Claude / Codex / Gemini, run the installer above (or `--global`).
 
 ## Related libraries (quick view)
 
@@ -236,7 +256,16 @@ Heavy ML stacks are **not** installed by default. See comments in `requirements.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).  
+Security reports: [SECURITY.md](SECURITY.md).  
+Release notes: [CHANGELOG.md](CHANGELOG.md).
+
+Maintainer checks:
+
+```bash
+python scripts/sync-agent-skills.py
+python scripts/prepublish-check.py
+```
 
 ## License
 

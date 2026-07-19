@@ -41,8 +41,8 @@ npx svgo --version
 When editing the skill, update `skills/open-source-repo/` then sync:
 
 ```bash
-python skills/installer/install.py install   # refresh vendored project copies
-# with Node: node skills/installer/scripts/sync-skill.mjs
+python scripts/sync-agent-skills.py
+python scripts/prepublish-check.py
 ```
 
 See [docs/agent-skill.md](docs/agent-skill.md).
@@ -59,19 +59,15 @@ See [docs/agent-skill.md](docs/agent-skill.md).
 ## Checks before opening a PR
 
 ```bash
+make ci
+# or:
 ruff check src tests scripts
-pytest
-python -m image2svg --help
-python -c "from image2svg.web.app import app; print(app.title)"
-```
-
-If you touched `skills/` or the installer, also run (required before push/publish):
-
-```bash
+pytest -q
 python scripts/prepublish-check.py
+python -m image2svg --help
 ```
 
-Do not push skill/installer changes when the gate fails.
+Do not push when the gate fails. Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Pull request checklist
 

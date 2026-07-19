@@ -12,15 +12,19 @@ Works with **Cursor**, **Claude Code**, **OpenAI Codex**, **Gemini CLI**, and an
 | `skills/open-source-repo/references/` | Layout + install + doc templates |
 | `skills/installer/` | npm CLI (`open-source-repo-skill`) + Python fallback |
 
-This repository already vendors the skill into:
+This repository vendors a **single canonical skill** plus two committed copies:
 
-- `.cursor/skills/open-source-repo/`
-- `.claude/skills/open-source-repo/`
-- `.codex/skills/open-source-repo/`
-- `.gemini/skills/open-source-repo/`
+- `skills/open-source-repo/` (source of truth)
 - `.agents/skills/open-source-repo/`
+- `.cursor/skills/open-source-repo/`
 
-So agents opened on this repo can use it immediately.
+Keep them aligned with:
+
+```bash
+python scripts/sync-agent-skills.py
+```
+
+Install into Claude / Codex / Gemini (or globally) with the installer below.
 
 ## Install into your machine / another project
 
